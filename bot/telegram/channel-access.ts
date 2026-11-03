@@ -10,12 +10,31 @@ interface ChannelAccessApi {
 
 let botId: number | undefined;
 
+export async function validateBotApiToken(api: Pick<Api, 'getMe'>): Promise<number> {
+  try {
+    botId = (await api.getMe()).id;
+    return botId;
+  } catch (error) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'error_code' in error &&
+      error.error_code === 401
+    ) {
+      throw new Error(
+        'Telegram rejected BOT_TOKEN (401 Unauthorized). Replace it with the current token from BotFather.',
+      );
+    }
+    throw error;
+  }
+}
+
 export async function assertBotCanPostInChannel(
   api: Pick<Api, 'getMe' | 'getChatMember'> & ChannelAccessApi,
   channelId: string,
 ): Promise<void> {
-  botId ??= (await api.getMe()).id;
-  const member = await api.getChatMember(channelId, botId);
+  const userId = botId ?? (await validateBotApiToken(api));
+  const member = await api.getChatMember(channelId, userId);
 
   if (
     member.status === 'creator' ||

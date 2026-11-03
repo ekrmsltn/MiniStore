@@ -1,7 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
-import { assertBotCanPostInChannel } from '../telegram/channel-access';
+import { assertBotCanPostInChannel, validateBotApiToken } from '../telegram/channel-access';
 
 describe('Telegram channel posting access', () => {
+  it('reports an invalid bot token clearly without exposing it', async () => {
+    const api = {
+      getMe: vi.fn().mockRejectedValue({ error_code: 401 }),
+    };
+
+    await expect(validateBotApiToken(api)).rejects.toThrow(
+      'Telegram rejected BOT_TOKEN (401 Unauthorized). Replace it with the current token from BotFather.',
+    );
+  });
+
+  it('surfaces temporary Bot API failures for startup handling', async () => {
+    const error = new Error('network unavailable');
+    const api = { getMe: vi.fn().mockRejectedValue(error) };
+
+    await expect(validateBotApiToken(api)).rejects.toBe(error);
+  });
+
   it('requires channel administrator posting permission and reuses the bot ID', async () => {
     const getMe = vi.fn().mockResolvedValue({ id: 42 });
     const getChatMember = vi

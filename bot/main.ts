@@ -29,6 +29,7 @@ async function main() {
     { initializeIndex, startConsistencyChecks },
     { retryUntilReady },
     { registerTelegramWebhook, setWebhookReady, telegramWebhookRouter },
+    { validateBotApiToken },
   ] = await Promise.all([
     import('./health.js'),
     import('./bot.js'),
@@ -37,7 +38,11 @@ async function main() {
     import('./telegram/index.js'),
     import('./startup.js'),
     import('./webhook.js'),
+    import('./telegram/channel-access.js'),
   ]);
+
+  await validateBotApiToken(bot.api);
+  logger.info('✅ Telegram Bot API token validated');
 
   let shutdownPromise: Promise<void> | undefined;
   let stopConsistencyChecks = () => {};

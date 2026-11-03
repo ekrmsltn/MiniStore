@@ -534,9 +534,13 @@ docker stats ministore
   retry warning, not the underlying error. If the accompanying
   `Telegram channel access checks failed` log shows a channel as not ready,
   inspect the preceding `Bot API cannot post...` or
-  `Owner session cannot read...` warning. The Bot API warning means check the
-  channel ID and add the bot as an administrator with permission to post. The owner
-  session warning means check the full channel ID and confirm the account in
+  `Owner session cannot read...` warning. If the Bot API error is `401
+Unauthorized`, Telegram rejected `BOT_TOKEN`: replace it with the current
+  token from BotFather in the local `.env` or hosting environment, then restart.
+  This happens before channel permissions are checked; changing channel access
+  will not fix an invalid token. Other Bot API permission errors mean check the
+  channel ID and add the bot as an administrator with permission to post. The
+  owner session warning means check the full channel ID and confirm the account in
   `TELEGRAM_USER_SESSION` matches `OWNER_ID`, is still a member, and can read
   history. If instead logs say index recovery failed, inspect that error for
   malformed or inaccessible Management Channel history. Startup retries
