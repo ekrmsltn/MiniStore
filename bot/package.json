@@ -1,0 +1,43 @@
+{
+  "name": "ministore-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MiniStore Telegram Bot Application",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "tsx watch main.ts",
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "mtproto:login": "tsx scripts/create-mtproto-session.ts",
+    "lint": "eslint bot.ts config.ts errors.ts health.ts logger.ts main.ts models.ts private-chat.ts webhook.ts services telegram",
+    "format": "prettier --write *.ts services telegram",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.9",
+    "express": "^5.3.0",
+    "grammy": "^1.27.0",
+    "helmet": "^8.0.0",
+    "pino": "^9.4.0",
+    "pino-http": "^10.3.0",
+    "pino-pretty": "^13.2.0",
+    "teleproto": "^1.232.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "@types/supertest": "^7.2.1",
+    "eslint": "^9.0.0",
+    "prettier": "^3.3.0",
+    "supertest": "^7.3.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.72.1",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  },
+  "overrides": {
+    "minimatch": "^11.0.4"
+  }
+}
