@@ -50,106 +50,19 @@ buttons for the same actions.
 
 ### MiniStore assistant
 
-Choose **🤖 Ask assistant** from the `/store` menu and send a question. You can
-also use `/ask` to start the
-prompt or send a question directly, for example
-`/ask how do I restore a deleted folder?`. After an answer, send another plain
-text message to continue the same conversation. Each assistant reply tells you
-that you can use `/cancel` to cancel. `/cancel` stops an in-flight request,
-clears the assistant context, and returns you to the MiniStore home menu.
-Access is limited to the configured owner and active, approved accounts with
-the `user` or `admin` role. Pending, rejected, suspended, blocked, and inactive
-accounts cannot use the assistant or other store features.
-People who have not been approved can still use `/start` to request access,
-`/help` for generic command information, `/status` to see their own account
-state, and `/cancel` to clear their pending interaction; these do not grant
-access to store content or assistant responses.
+Choose **🤖 Ask assistant** from `/store`, use `/ask`, or send `/ask <question>`.
+After an answer, send plain text to continue the conversation. Use `/cancel`
+to stop an in-flight request and clear the conversation. Only the configured
+owner and active, approved users/admins can use it; the bot applies each
+caller's current role and permissions. Assistant replies support common
+Markdown formatting, with HTML from the provider escaped for Telegram.
 
-Recent conversation turns are kept only in the bot process's memory (up to
-five question/answer pairs) and sent to the configured AI provider along with
-the next question. They expire after 30 minutes of inactivity, are lost if the
-bot restarts, and are immediately cleared by `/cancel`. They are not written to
-disk, logs, or the Management Channel. Telegram does not notify bots when a
-user manually clears a chat, so clearing Telegram chat history alone cannot
-clear this short-lived in-memory context; use `/cancel` when you want to clear
-it immediately.
-
-Answers are personalized using the caller's current role and permissions:
-owners can ask about owner-level management; admins can ask about the
-administrator dashboard and receive action guidance only for their explicitly
-granted permissions; regular users receive user workflows and are directed to
-an administrator for restricted tasks. The assistant knows the command names
-and their access gates only as needed for the caller's role; it receives
-operational instructions for restricted commands only when the caller is
-authorized. The bot itself determines role and permissions—it does not trust
-a role claimed in a question.
-The assistant context includes basic active file/folder/download totals for
-active users, user-request totals only for callers with `manage_users`, and
-recent audit-event totals only for callers with `view_audit_logs`.
-For resource questions, it looks up the current active catalog and sends up to
-eight relevant records, including the MiniStore resource ID, title,
-description, tags, filename, category, file type, folder, and version. You can
-ask for a resource's ID, and the assistant will return the exact ID attached
-to the matching record. Deleted resources are excluded and the lookup is
-refreshed for each question. Broad catalog questions show up to eight recently
-updated records; use `/search` for more. These selected resource details and
-IDs are sent to the configured AI provider for resource questions; Telegram
-storage IDs and uploader IDs are not sent.
-
-The assistant uses a maintained, credential-free MiniStore knowledge base
-covering documented user workflows, troubleshooting, and permission-specific
-features. It is not a live code or documentation search and does not see the
-running server. Its knowledge is not exhaustive; for details it does not know,
-ask an administrator. Admin-only guidance is included only for that caller's
-granted permissions, and owner/deployment guidance is included only for the
-configured owner.
-
-Assistant usage is limited per Telegram account over a rolling 24-hour window:
-active users may make 50 requests, admins may make 100, and the configured
-owner has no daily request limit. Each accepted request attempt counts even if
-the provider later fails. Usage timestamps are stored in the private Management
-Channel so limits survive bot restarts; prompts and answers are not stored as
-part of usage tracking. The assistant does not receive a user's current usage
-count or remaining quota. Use `/usage` to check requests used, requests
-remaining, and the next request-slot reset time. Assistant replies also show
-the current usage summary. When the limit is reached, the bot gives the exact
-next available time in UTC; because the limit is rolling, each request slot
-becomes available 24 hours after its corresponding request.
-The configured owner can additionally see aggregate account-status counts
-and per-account assistant usage in the **AI usage overview** in admin tools.
-
-The assistant is read-only: it can explain MiniStore but cannot upload,
-download, delete, change roles, or perform other actions. It does not receive
-Bot API tokens, Telegram sessions, the API key, `.env` contents, Telegram IDs,
-other users' identities, raw audit records, or per-user activity history. If
-an active user asks who the configured owner is, the assistant may receive the
-owner's saved display name and public Telegram username for that request only.
-That profile is refreshed when the owner sends `/start`; no owner-only
-instructions are included with the answer. MiniStore does not currently keep
-per-user search or browsing history. Questions and the minimal role-scoped
-context are sent to the configured AI provider to generate an answer; do not
-include passwords, tokens, private personal data, or other sensitive
-information in a question or follow-up, because recent turns are sent again to
-the provider. Invalid questions and rate limits receive an
-explanation; provider/network failures receive a safe error message and are
-logged without returning provider response bodies. Unexpected errors are
-logged and shown as a generic temporary-unavailability message. If the
-assistant is not configured or the provider is unavailable, use the normal bot
-menus or contact an administrator.
-
-Assistant replies render common Markdown formatting (headings, emphasis,
-numbered/bulleted lists, tables, links, and inline or fenced code) in Telegram.
-Telegram-style bot commands remain plain text even when the assistant wraps
-them and their usage arguments in inline code (for example
-`/search <query>`), so Telegram can make the command tappable like the cancel
-hint. This works for commands not currently listed in the bot guide too. Other
-inline and fenced code remains formatted.
-Commands sent while the assistant is waiting for a question are handled as bot
-commands, not forwarded as assistant questions.
-HTML from the provider is escaped rather than interpreted; links are rendered
-only for HTTP or HTTPS addresses. If formatted output would exceed Telegram's
-message limit, the bot sends the bounded answer as plain text; if Telegram
-rejects formatting, the bot retries the answer without parse mode.
+The assistant can search current active resources and offer an in-chat
+**Download** button for a match. It uses resource details internally and does
+not list tags or resource IDs in its answers. See the dedicated
+[AI assistant guide](./ai-assistant.md) for role behavior, resource matching
+and delivery, provider data handling, privacy, request limits, configuration,
+and troubleshooting.
 
 ## Browsing and searching
 

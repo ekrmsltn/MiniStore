@@ -132,9 +132,11 @@ included in prompts or assistant context, and log redaction recognizes
 `API_KEY`. A question and minimum role-filtered context are sent to the
 configured provider, so tell users this is enabled and do not send sensitive
 user data. For resource questions, up to eight matched active resource records
-are also sent, including their MiniStore resource IDs and bounded catalog
-metadata; Telegram storage IDs and uploader IDs are excluded. A direct question
-about the owner may include the owner's saved display name and public username.
+are also sent to the provider, including internal MiniStore resource IDs and
+bounded catalog metadata; Telegram storage IDs and uploader IDs are excluded.
+The assistant does not display its internal IDs or tags to users. A direct
+question about the owner may include the owner's saved display name and public
+username.
 The assistant is read-only, has no tools to modify the store, and never
 receives Telegram credentials, `.env` contents, Telegram/user IDs, raw audit
 events, or individual user activity.
@@ -162,9 +164,12 @@ documented product workflows, permission-specific help, and safe owner
 troubleshooting—not source files, full documentation, logs, or live machine
 state. Resource metadata is looked up from the current active index for each
 resource question; deleted records are excluded and broad catalog results are
-capped at eight. Keep this knowledge reviewed and updated with behavior or
-documentation changes; the model must acknowledge missing knowledge instead of
-guessing.
+capped at eight. Matching metadata and resource IDs are sent to the configured
+AI provider, but IDs and tag lists are removed from user-facing answers.
+Assistant-selected IDs are checked against the current snapshot before the bot
+offers an in-chat Download button. Keep this knowledge reviewed and updated
+with behavior or documentation changes; the model must acknowledge missing
+knowledge instead of guessing.
 The assistant retains up to five recent question/answer pairs in process
 memory for 30 minutes after the last question. The turns are sent to the
 provider with each follow-up and are not written to disk, logs, or Telegram
@@ -187,6 +192,12 @@ include the exact next available time in UTC; this is a rolling window rather
 than a single daily reset. The configured owner also has an **AI usage
 overview** in the admin tools showing account status and per-account usage;
 this all-user view is owner-only and is not included in assistant prompts.
+
+For the complete explanation of assistant behavior, access boundaries, data
+sent to the provider, resource matching and delivery, privacy, and maintenance,
+see the [AI assistant guide](./ai-assistant.md). Review the provider's data
+handling policy before deployment and tell users that assistant questions and
+permitted context are sent to that provider.
 
 The bot must be a channel administrator with permission to post in both
 channels. Startup verifies the bot's member status and posting permission

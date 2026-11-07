@@ -3,7 +3,9 @@
 This guide describes MiniStore's code organization, runtime architecture,
 data flows, and development practices. For configuration and deployment, see
 the [operations guide](./operations.md). For Telegram user workflows, see the
-[bot guide](./bot-guide.md).
+[bot guide](./bot-guide.md). For assistant behavior, privacy, provider
+configuration, and resource delivery, see the
+[AI assistant guide](./ai-assistant.md).
 
 ## Project layout
 
@@ -206,6 +208,11 @@ Operational recovery steps and health semantics are documented in the
 
 ## Required AI assistant
 
+For the user-facing behavior, provider data flow, privacy, configuration, and
+operational details, see the [AI assistant guide](./ai-assistant.md). The
+engineering rules below are the implementation contract for changes to this
+feature.
+
 `services/assistant.ts` implements a read-only assistant over configurable
 `AI_BASE_URL`, `API_KEY`, `AI_MODEL`, and `AI_API_FORMAT` settings. Keep all
 provider credentials in the environment. The API key belongs only in the
@@ -246,9 +253,12 @@ ungranted admin guidance and owner/deployment guidance are absent from other
 callers' provider requests. Do not replace it with unrestricted source,
 documentation, environment, log, or channel-history access.
 Resource context must be freshly resolved per request, capped, and treated as
-untrusted data; require the model to return the exact matching resource ID
-instead of inventing one. Test metadata matching, exact ID lookup, deleted-item
-exclusion, and truncation.
+untrusted data. The model may return selected resource IDs only in the
+machine-readable download marker; validate each ID against the current active
+snapshot before creating a Download button. Strip markers, IDs, and tag-list
+output before replying or storing the conversation turn. Never expose the
+internal resource ID in user-facing text. Test metadata matching, marker
+validation, deleted-item exclusion, answer sanitization, and truncation.
 Assistant conversation turns are process-memory-only, bounded to five recent
 question/answer pairs, and expire after 30 minutes without a follow-up.
 `cancelAssistantConversation` must clear this state and abort the caller's

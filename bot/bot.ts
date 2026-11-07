@@ -60,7 +60,7 @@ import {
 import { notifyAdminsOfAccessRequest, notifyUserOfAccessDecision } from './services/notifications';
 import { AVAILABLE_PERMISSIONS, hasPermission } from './services/permissions';
 import {
-  askAssistant,
+  askAssistantWithResources,
   AssistantCancelledError,
   AssistantProviderError,
   AssistantUsageStatus,
@@ -478,9 +478,9 @@ async function replyWithAssistant(
     });
   }
   try {
-    let answer: string;
+    let assistantReply: Awaited<ReturnType<typeof askAssistantWithResources>>;
     try {
-      answer = await askAssistant(telegramId, question);
+      assistantReply = await askAssistantWithResources(telegramId, question);
     } catch (error) {
       if (error instanceof AssistantCancelledError) return;
       logger.warn({ err: error, userId: telegramId, msg: 'Assistant request failed' });
@@ -501,8 +501,15 @@ async function replyWithAssistant(
     if (!assistantFlowActive.has(telegramId)) return;
     textActionState.set(telegramId, { type: 'assistant-question' });
     const usage = getAssistantUsageStatus(telegramId);
-    const boundedAnswer = answer.length > 3_600 ? `${answer.slice(0, 3_599)}…` : answer;
-    await sendAssistantReply(ctx, `${boundedAnswer}\n\n${formatAssistantUsage(usage)}`);
+    const boundedAnswer =
+      assistantReply.answer.length > 3_600
+        ? `${assistantReply.answer.slice(0, 3_599)}…`
+        : assistantReply.answer;
+    await sendAssistantReply(
+      ctx,
+      `${boundedAnswer}\n\n${formatAssistantUsage(usage)}`,
+      assistantReply.resourceIds,
+    );
   } finally {
     await deleteAssistantThinkingMessage(ctx, telegramId);
   }
@@ -519,15 +526,40 @@ function formatAssistantUsage(usage: AssistantUsageStatus): string {
   return `Assistant usage (rolling 24 hours): ${usage.used}/${usage.limit} used; ${usage.remaining} remaining.${reset}`;
 }
 
-async function sendAssistantReply(ctx: Context, answer: string): Promise<void> {
+function getAssistantResourceKeyboard(resourceIds: string[]): InlineKeyboard | undefined {
+  const resources = resourceIds.flatMap((resourceId) => {
+    const resource = getResource(resourceId);
+    return resource && !resource.isDeleted ? [resource] : [];
+  });
+  if (resources.length === 0) return undefined;
+
+  const keyboard = new InlineKeyboard();
+  for (const resource of resources) {
+    const callbackData = `lib:download:${resource.id.slice('resource:'.length)}`;
+    if (Buffer.byteLength(callbackData, 'utf8') > 64) continue;
+    keyboard.text(`⬇️ Download: ${resource.title}`.slice(0, 60), callbackData).row();
+  }
+  return keyboard.inline_keyboard.length > 0 ? keyboard : undefined;
+}
+
+async function sendAssistantReply(
+  ctx: Context,
+  answer: string,
+  resourceIds: string[] = [],
+): Promise<void> {
   const reply = prepareAssistantReply(answer, assistantCancelHint);
+  const replyMarkup = getAssistantResourceKeyboard(resourceIds);
+  const options = {
+    ...(reply.parseMode ? { parse_mode: reply.parseMode } : {}),
+    ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+  };
   if (!reply.parseMode) {
-    await ctx.reply(reply.text);
+    await ctx.reply(reply.text, options);
     return;
   }
 
   try {
-    await ctx.reply(reply.text, { parse_mode: reply.parseMode });
+    await ctx.reply(reply.text, options);
   } catch (error) {
     if (
       !(error instanceof GrammyError) ||
@@ -541,7 +573,9 @@ async function sendAssistantReply(ctx: Context, answer: string): Promise<void> {
       description: error.description,
       msg: 'Telegram rejected formatted assistant reply; retrying as plain text',
     });
-    await ctx.reply(prepareAssistantReply(answer, assistantCancelHint, true).text);
+    await ctx.reply(prepareAssistantReply(answer, assistantCancelHint, true).text, {
+      ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+    });
   }
 }
 

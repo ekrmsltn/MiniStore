@@ -15,6 +15,9 @@ MiniStore is a private Telegram bot for organizing and sharing files. Users brow
 
 - **Using MiniStore:** [Bot guide](./docs/bot-guide.md) — access, commands,
   permissions, browsing, uploads, administration, and user troubleshooting.
+- **AI assistant:** [AI assistant guide](./docs/ai-assistant.md) — assistant
+  behavior, role boundaries, resource matching and delivery, provider data
+  handling, privacy, configuration, and maintenance.
 - **Running MiniStore:** [Operations guide](./docs/operations.md) — credentials,
   channel setup, Docker deployment, persistence, backups, health checks, and
   incident troubleshooting.
