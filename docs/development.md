@@ -219,11 +219,20 @@ Authorization and context generation must stay in MiniStore code. Only the
 configured owner and active, approved users/admins can ask questions; build
 caller-scoped aggregate context using the caller's current permissions before
 making a provider request. Do not send
-names, Telegram identifiers, raw audit entities, `.env` values, or
-per-user activity. User questions and the permitted context leave the process
-for the configured provider, so any future context expansion needs privacy
-review and user-facing documentation. The model receives no tools or ability
-to mutate MiniStore state. Preserve provider timeouts, input/output limits,
+other users' names, Telegram identifiers, raw audit entities, `.env` values,
+or per-user activity. For a direct owner-identity question only, include the
+configured owner's saved display name and validated public username if
+available; do not include the owner ID or owner-only guidance. Refresh the
+owner profile from Telegram when the owner sends `/start`. For resource
+questions, query the current active in-memory catalog each request and send at
+most eight ranked records with their MiniStore resource IDs and bounded,
+user-visible metadata. Exclude soft-deleted resources, Telegram storage IDs,
+file IDs, and uploader IDs; IDs sent to the model must be MiniStore resource
+IDs only. Broad catalog questions may return the eight most recently updated
+active records. User questions and permitted context leave the process for the
+configured provider, so document and privacy-review context expansions. The
+model receives no tools or ability to mutate MiniStore state. Preserve provider
+timeouts, input/output limits,
 and per-user rate limiting. The home-menu callback and `/ask` command must
 continue to share the same authorization and assistant service. The model
 context must distinguish owner, admin, and user roles and include only
@@ -236,6 +245,10 @@ changes, keep permission-specific sections gated in code, and test that
 ungranted admin guidance and owner/deployment guidance are absent from other
 callers' provider requests. Do not replace it with unrestricted source,
 documentation, environment, log, or channel-history access.
+Resource context must be freshly resolved per request, capped, and treated as
+untrusted data; require the model to return the exact matching resource ID
+instead of inventing one. Test metadata matching, exact ID lookup, deleted-item
+exclusion, and truncation.
 Assistant conversation turns are process-memory-only, bounded to five recent
 question/answer pairs, and expire after 30 minutes without a follow-up.
 `cancelAssistantConversation` must clear this state and abort the caller's

@@ -129,11 +129,15 @@ provider's key private just like `BOT_TOKEN` and `TELEGRAM_USER_SESSION`.
 
 The API key is sent only as the provider's HTTP authentication header. It is not
 included in prompts or assistant context, and log redaction recognizes
-`API_KEY`. A question and the minimum role-filtered aggregate context are sent
-to the configured provider, so tell users this is enabled and do not send
-sensitive user data. The assistant is read-only, has no tools to modify the
-store, and never receives Telegram credentials, `.env` contents, identifiers,
-raw audit events, or individual user activity.
+`API_KEY`. A question and minimum role-filtered context are sent to the
+configured provider, so tell users this is enabled and do not send sensitive
+user data. For resource questions, up to eight matched active resource records
+are also sent, including their MiniStore resource IDs and bounded catalog
+metadata; Telegram storage IDs and uploader IDs are excluded. A direct question
+about the owner may include the owner's saved display name and public username.
+The assistant is read-only, has no tools to modify the store, and never
+receives Telegram credentials, `.env` contents, Telegram/user IDs, raw audit
+events, or individual user activity.
 
 Active users see **🤖 Ask assistant** in the `/store` inline
 menu. Users can also ask with `/ask <question>` or start a prompted question
@@ -156,8 +160,11 @@ assistant access.
 The assistant receives a maintained, credential-free knowledge base of
 documented product workflows, permission-specific help, and safe owner
 troubleshooting—not source files, full documentation, logs, or live machine
-state. Keep this knowledge reviewed and updated with behavior or documentation
-changes; the model must acknowledge missing knowledge instead of guessing.
+state. Resource metadata is looked up from the current active index for each
+resource question; deleted records are excluded and broad catalog results are
+capped at eight. Keep this knowledge reviewed and updated with behavior or
+documentation changes; the model must acknowledge missing knowledge instead of
+guessing.
 The assistant retains up to five recent question/answer pairs in process
 memory for 30 minutes after the last question. The turns are sent to the
 provider with each follow-up and are not written to disk, logs, or Telegram

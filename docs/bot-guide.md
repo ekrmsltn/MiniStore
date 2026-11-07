@@ -79,12 +79,22 @@ owners can ask about owner-level management; admins can ask about the
 administrator dashboard and receive action guidance only for their explicitly
 granted permissions; regular users receive user workflows and are directed to
 an administrator for restricted tasks. The assistant knows the command names
-and their access gates, but receives operational instructions for restricted
-commands only when the caller is authorized. The bot itself
-determines role and permissions—it does not trust a role claimed in a question.
+and their access gates only as needed for the caller's role; it receives
+operational instructions for restricted commands only when the caller is
+authorized. The bot itself determines role and permissions—it does not trust
+a role claimed in a question.
 The assistant context includes basic active file/folder/download totals for
 active users, user-request totals only for callers with `manage_users`, and
 recent audit-event totals only for callers with `view_audit_logs`.
+For resource questions, it looks up the current active catalog and sends up to
+eight relevant records, including the MiniStore resource ID, title,
+description, tags, filename, category, file type, folder, and version. You can
+ask for a resource's ID, and the assistant will return the exact ID attached
+to the matching record. Deleted resources are excluded and the lookup is
+refreshed for each question. Broad catalog questions show up to eight recently
+updated records; use `/search` for more. These selected resource details and
+IDs are sent to the configured AI provider for resource questions; Telegram
+storage IDs and uploader IDs are not sent.
 
 The assistant uses a maintained, credential-free MiniStore knowledge base
 covering documented user workflows, troubleshooting, and permission-specific
@@ -110,13 +120,17 @@ and per-account assistant usage in the **AI usage overview** in admin tools.
 
 The assistant is read-only: it can explain MiniStore but cannot upload,
 download, delete, change roles, or perform other actions. It does not receive
-Bot API tokens, Telegram sessions, the API key, `.env` contents, usernames,
-Telegram IDs, raw audit records, or per-user activity history. MiniStore does
-not currently keep per-user search or browsing history. Questions and the
-minimal role-scoped context are sent to the configured AI provider to generate
-an answer; do not include passwords, tokens, private personal data, or other
-sensitive information in a question or follow-up, because recent turns are
-sent again to the provider. Invalid questions and rate limits receive an
+Bot API tokens, Telegram sessions, the API key, `.env` contents, Telegram IDs,
+other users' identities, raw audit records, or per-user activity history. If
+an active user asks who the configured owner is, the assistant may receive the
+owner's saved display name and public Telegram username for that request only.
+That profile is refreshed when the owner sends `/start`; no owner-only
+instructions are included with the answer. MiniStore does not currently keep
+per-user search or browsing history. Questions and the minimal role-scoped
+context are sent to the configured AI provider to generate an answer; do not
+include passwords, tokens, private personal data, or other sensitive
+information in a question or follow-up, because recent turns are sent again to
+the provider. Invalid questions and rate limits receive an
 explanation; provider/network failures receive a safe error message and are
 logged without returning provider response bodies. Unexpected errors are
 logged and shown as a generic temporary-unavailability message. If the

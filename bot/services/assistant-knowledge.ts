@@ -2,26 +2,26 @@ import { AdminPermission } from './permissions';
 
 export const sharedAssistantKnowledge = [
   'MiniStore is a Telegram bot for browsing and managing files stored in private Telegram channels. There is no separate website.',
-  'Command reference: /start checks access or opens the store; /store opens the store menu; /search searches active resource titles, descriptions, and tags; /status shows the caller role and account status; /usage shows the caller assistant request usage and next reset; /help shows basic help; /cancel clears a pending prompt or upload session and cancels an assistant conversation; /ask asks this assistant. /admin, /upload, /users, and /requests are restricted commands: /admin requires the admin role, /upload requires upload_resources, and /users and /requests require manage_users. The owner has all permissions. Do not give restricted-command instructions beyond the caller role and permissions in the supplied context.',
-  'Assistant usage limits are rolling: active users may make 50 requests per 24 hours, administrators may make 100 requests per 24 hours, and the configured owner has no daily request limit. Every accepted request attempt counts, including a request whose provider call later fails. Usage data tracks request timestamps only; it does not contain prompts or answers. The assistant does not receive the caller remaining quota.',
-  'The owner has full access. Other people request access with /start. An approved active user can browse folders, search, favorite resources, and download current or earlier versions. Pending, rejected, suspended, and blocked accounts cannot use store features.',
+  'Command reference: /start requests access or opens the store; /store opens the store menu; /search searches active resource titles, descriptions, and tags; /status shows the caller role and account status; /usage shows the caller assistant request usage and next reset; /help shows basic help; /cancel clears a pending prompt or upload session and cancels an assistant conversation; /ask asks this assistant. Only explain administrative features when the supplied caller role and permissions authorize them.',
+  'Assistant usage limits are rolling and depend on the caller role supplied with the request. Every accepted request attempt counts, including a request whose provider call later fails. Usage data tracks request timestamps only; it does not contain prompts or answers. The assistant does not receive the caller remaining quota.',
+  'People request access with /start. An approved active user can browse folders, search, favorite resources, and download current or earlier versions. Pending, rejected, suspended, and blocked accounts cannot use store features.',
   'Browse from /store using inline buttons. Listings are paginated; a resource detail screen shows its metadata, versions, and download count. Search results match active resources by title, description, or tag.',
-  'An upload is a separate resource. Supported Telegram media includes documents, photos, videos, audio, animations, voice notes, video notes, and stickers; each upload is limited to 50 MB and Telegram may impose additional limits. Existing Telegram file IDs are rejected as duplicates.',
   'Names are unique case-insensitively among active files and folders in the same folder. A collision is handled by adding a numbered suffix such as (1); file suffixes go before the extension. Names may be reused in different folders.',
   'Downloads are sent in Telegram. A download failure may mean the stored Telegram message is unavailable; ask an administrator to check the Storage Channel rather than repeatedly retrying.',
   'Use /cancel or the relevant Cancel button to stop a pending prompt or upload session. A bot restart clears temporary actions but does not remove saved resources or metadata.',
   'The assistant only explains MiniStore. It cannot perform actions, inspect live logs or health, see private channel history, or know an operation succeeded. For uncertain writes, check the store before retrying to avoid duplicate work.',
   'MiniStore does not record per-user search or browsing history. Download counts are aggregate and are not attributable to a particular person.',
-  'Admin permissions do not grant the ability to manage administrator roles or suspend, block, or reactivate accounts; these actions are reserved for the owner.',
 ] as const;
 
 export const adminAssistantKnowledge = [
   'The /admin command opens the administrator dashboard. Show and explain only actions allowed by the caller permissions listed in the supplied context. Admins cannot promote or demote administrators, change admin permissions, suspend or block users, or reactivate suspended or blocked accounts; those actions are reserved for the configured owner.',
+  'Administrators may make 100 assistant requests per rolling 24-hour window. The configured owner has no daily request limit.',
 ] as const;
 
 const permissionKnowledge: Record<AdminPermission, string[]> = {
   upload_resources: [
     'With upload_resources, /upload starts a new upload to the root folder. An administrator can also upload new resources, add a version from a resource detail screen, and edit resource metadata.',
+    'Uploads support Telegram documents, photos, videos, audio, animations, voice notes, video notes, and stickers. Each upload is limited to 50 MB and Telegram may impose additional limits. Existing Telegram file IDs are rejected as duplicates.',
     'Resource metadata limits: title 1–500 characters; description up to 4,000 characters; up to 20 tags of at most 100 characters each; category label up to 100 characters. Send - to clear description, tags, or category. Categories are labels, not a separate registry.',
     'A version upload accepts one file per action. Previous versions remain downloadable until the resource is permanently deleted.',
     'If upload confirmation fails after a file was sent, check the resource list before retrying because Telegram may have accepted the media.',
@@ -49,6 +49,7 @@ const permissionKnowledge: Record<AdminPermission, string[]> = {
 
 export const ownerAssistantKnowledge = [
   'Only the configured owner can promote or demote administrators, change admin permissions, suspend or block users, and reactivate suspended or blocked accounts. The owner has all admin permissions.',
+  'The configured owner has no daily assistant request limit.',
   'MiniStore stores metadata and audit records in the Management Channel and media messages in the Storage Channel. Startup checks Telegram access and rebuilds the in-memory index from channel history.',
   'A temporary health response of HTTP 503 can occur while startup recovery is running. Check service logs and allow the configured retry process to continue. Telegram channel access failures can prevent normal operations.',
   'For Docker operations, use the Compose command documented for the deployment. Rebuild and recreate the container after application-code or dependency changes; changing only .env values requires recreating the container, not rebuilding the image.',
@@ -56,8 +57,15 @@ export const ownerAssistantKnowledge = [
   'The assistant does not receive live runtime status, logs, channel permissions, environment values, source files, or deployment credentials. It can provide documented troubleshooting steps but cannot diagnose the current machine state.',
 ] as const;
 
+export const userAssistantKnowledge = [
+  'Active regular users may make 50 assistant requests per rolling 24-hour window.',
+] as const;
+
 export function getAssistantKnowledge(role: string, permissions: string[]): string[] {
   const knowledge: string[] = [...sharedAssistantKnowledge];
+  if (role === 'user') {
+    knowledge.push(...userAssistantKnowledge);
+  }
   if (role === 'admin' || role === 'owner') {
     knowledge.push(...adminAssistantKnowledge);
   }

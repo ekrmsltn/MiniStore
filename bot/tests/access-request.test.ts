@@ -65,6 +65,48 @@ describe('Access request service', () => {
     expect(canAccessStore(1)).toBe(false);
   });
 
+  it('refreshes the saved owner profile when the owner sends /start', async () => {
+    storedUser = createMockUser({
+      id: 'user:1',
+      telegramId: 1,
+      role: 'owner',
+      username: 'old_owner',
+      firstName: 'Old',
+      lastName: 'Name',
+    });
+    const { createOwnerRecord } = await import('../services/users');
+
+    const updated = await createOwnerRecord(1, 'new_owner', 'New', 'Name');
+
+    expect(updated).toMatchObject({
+      id: 'user:1',
+      role: 'owner',
+      username: 'new_owner',
+      firstName: 'New',
+      lastName: 'Name',
+    });
+    expect(updateEntity).toHaveBeenCalledOnce();
+    expect(saveEntity).not.toHaveBeenCalled();
+  });
+
+  it('does not rewrite an unchanged owner profile', async () => {
+    storedUser = createMockUser({
+      id: 'user:1',
+      telegramId: 1,
+      role: 'owner',
+      username: 'ministore_owner',
+      firstName: 'MiniStore',
+      lastName: 'Owner',
+    });
+    const { createOwnerRecord } = await import('../services/users');
+
+    const result = await createOwnerRecord(1, 'ministore_owner', 'MiniStore', 'Owner');
+
+    expect(result).toBe(storedUser);
+    expect(updateEntity).not.toHaveBeenCalled();
+    expect(saveEntity).not.toHaveBeenCalled();
+  });
+
   it('creates a pending user and identifies a newly submitted request', async () => {
     const { requestAccess } = await import('../services/users');
     const result = await requestAccess(12345, 'alice', 'Alice', null);

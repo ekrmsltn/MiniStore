@@ -205,9 +205,8 @@ bot.command('start', async (ctx) => {
     // OWNER BYPASS: Owner can access immediately without approval
     if (telegramId === config.ownerId) {
       const existing = getUserById(telegramId);
+      await createOwnerRecord(telegramId, username, firstName, lastName);
       if (!existing) {
-        // Owner doesn't exist yet — create the owner record directly
-        await createOwnerRecord(telegramId, username, firstName, lastName);
         logger.info({ userId: telegramId, msg: 'Owner record created on /start' });
       }
 

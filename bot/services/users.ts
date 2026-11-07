@@ -4,12 +4,7 @@
  */
 
 import crypto from 'crypto';
-import {
-  UserEntity,
-  AuditEntity,
-  generateEntityId,
-  UserRole,
-} from '../models';
+import { UserEntity, AuditEntity, generateEntityId, UserRole } from '../models';
 import { index } from '../telegram/index';
 import { loadConfig } from '../config';
 import logger from '../logger';
@@ -406,8 +401,31 @@ export async function createOwnerRecord(
   lastName: string | null,
 ): Promise<UserEntity> {
   const existing = index.getUserByTelegramId(telegramId);
-  if (existing && existing.role === 'owner') {
-    return existing;
+  if (existing) {
+    if (
+      existing.role === 'owner' &&
+      existing.status === 'active' &&
+      existing.permissions.length === 0 &&
+      existing.username === username &&
+      existing.firstName === firstName &&
+      existing.lastName === lastName
+    ) {
+      return existing;
+    }
+
+    const updated: UserEntity = {
+      ...existing,
+      role: 'owner',
+      status: 'active',
+      permissions: [],
+      username,
+      firstName,
+      lastName,
+      updatedAt: new Date().toISOString(),
+    };
+    await index.updateEntity(updated);
+    logger.info({ userId: updated.id, msg: 'Owner profile refreshed' });
+    return updated;
   }
 
   const now = new Date().toISOString();
