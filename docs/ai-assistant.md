@@ -79,13 +79,16 @@ matches are sent to the model. Broad catalog questions use the eight most
 recently updated active records; use `/search` for the store's regular search
 flow.
 
-Resource metadata is search context, not answer content. The assistant may
-use titles and metadata to identify a match, but its user-facing reply must not
-list tags or reveal MiniStore resource IDs. The model can select resources
-using an internal marker; the bot removes the marker and validates every
-selected ID against the current active catalog before using it. If the model
-does not provide a marker but names a current resource, the bot can use that
-active title as a fallback selection.
+Resource metadata helps the assistant match the request; it should not be
+dumped as a metadata list in the answer. The assistant should name relevant
+resources naturally and may include a folder path when it helps the user
+locate or browse to the file. It may mention a relevant tag or search term
+when useful for finding the file, but should not list tags by default. It must
+not reveal MiniStore resource IDs or Telegram storage details. The model can
+select resources using an internal marker; the bot removes the marker and
+validates every selected ID against the current active catalog before using
+it. If the model does not provide a marker but names a current resource, the
+bot can use that active title as a fallback selection.
 
 For a validated match, the bot shows a **Download** button labelled with the
 resource title. Tapping the button makes the bot copy the file from the private

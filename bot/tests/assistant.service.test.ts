@@ -676,6 +676,55 @@ describe('AI assistant service', () => {
     expect(JSON.stringify(priorAssistantTurn)).not.toContain('Tags:');
   });
 
+  it('lets the AI use folder location and relevant search hints without dumping metadata', async () => {
+    index.getResources.mockReturnValue([
+      createMockResource({
+        id: 'resource:python-guide',
+        title: 'Python Basics',
+        description: 'A beginner programming guide.',
+        tags: ['python', 'beginner'],
+        folderId: 'folder:active',
+      }),
+    ]);
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content:
+                'Python Basics is in Test Folder, so you can find it there. Use the Download button below.\n[[MINISTORE_DOWNLOADS:resource:python-guide]]',
+            },
+          },
+        ],
+      }),
+    });
+    const { askAssistantWithResources } = await import('../services/assistant');
+
+    await expect(
+      askAssistantWithResources(user.telegramId, 'Give me the beginner Python guide'),
+    ).resolves.toMatchObject({
+      answer:
+        'Python Basics is in Test Folder, so you can find it there. Use the Download button below.',
+      resourceIds: ['resource:python-guide'],
+    });
+
+    const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const context = getContextFromRequest();
+    expect(context.currentResources?.items[0]).toMatchObject({
+      folder: 'Test Folder',
+      tags: ['python', 'beginner'],
+    });
+    expect(requestBody.messages[0].content).toContain(
+      'mention its folder path when that helps the user locate or browse to it',
+    );
+    expect(requestBody.messages[0].content).toContain(
+      'mention a relevant tag or search term only when it helps the user search',
+    );
+    expect(requestBody.messages[0].content).toContain('do not dump records or enumerate fields');
+    expect(requestBody.messages[0].content).not.toContain('Resource ID:');
+  });
+
   it('ignores model-selected resource IDs outside the current active snapshot', async () => {
     index.getResources.mockReturnValue([
       createMockResource({
