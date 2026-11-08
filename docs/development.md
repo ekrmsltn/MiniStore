@@ -377,3 +377,6 @@ and cleanup after partial uploads.
   user troubleshooting.
 - [Operations guide](./operations.md): secrets, deployment, backups, health,
   logs, and incident troubleshooting.
+- [Cloud deployment guide](./cloud-deployment.md): provider-neutral Node.js/npm
+  and Docker configuration, required environment values, health checks, and
+  service migration.

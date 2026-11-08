@@ -21,6 +21,9 @@ MiniStore is a private Telegram bot for organizing and sharing files. Users brow
 - **Running MiniStore:** [Operations guide](./docs/operations.md) — credentials,
   channel setup, Docker deployment, persistence, backups, health checks, and
   incident troubleshooting.
+- **Cloud deployment:** [Cloud deployment guide](./docs/cloud-deployment.md) —
+  provider-neutral Node.js/npm and Docker setup, environment variables, health
+  checks, and migration from an existing service.
 - **Changing MiniStore:** [Developer guide](./docs/development.md) — code map,
   architecture, persistence flows, authorization, error handling, and tests.
 
@@ -36,8 +39,6 @@ HTTPS `WEBHOOK_URL`, a random `WEBHOOK_SECRET`, and required AI provider
 settings (`AI_BASE_URL`, `API_KEY`, and `AI_MODEL`) first. The webhook URL
 must end in `/telegram/webhook`; see the
 [operations guide](./docs/operations.md#configuration-and-secrets).
-For Render Docker deployment, `WEBHOOK_URL` can be omitted; the app derives it
-from Render's `RENDER_EXTERNAL_URL`.
 MiniStore commands, files, and assistant conversations are restricted to
 private chats with the bot. Add the bot as an administrator in both channels
 and grant it permission to post.

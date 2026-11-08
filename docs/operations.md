@@ -4,27 +4,26 @@
 
 Copy `.env.example` to `.env` at the repository root and set:
 
-| Variable                | Purpose                                                             |
-| ----------------------- | ------------------------------------------------------------------- |
-| `BOT_TOKEN`             | Telegram Bot API token                                              |
-| `API_ID`, `API_HASH`    | Telegram MTProto application credentials                            |
-| `TELEGRAM_USER_SESSION` | Authenticated owner session for reading private channel history     |
-| `STORAGE_CHANNEL_ID`    | Private channel holding original media messages                     |
-| `MANAGEMENT_CHANNEL_ID` | Private channel holding entity and audit messages                   |
-| `OWNER_ID`              | Numeric Telegram ID of the owner                                    |
-| `WEBHOOK_URL`           | Public HTTPS webhook URL; optional on Render                        |
-| `WEBHOOK_SECRET`        | Random secret used to authenticate Telegram webhook requests        |
-| `PORT`                  | Health/status listener port; defaults to `3000` (Render assigns it) |
-| `NODE_ENV`              | Runtime environment                                                 |
-| `LOG_LEVEL`             | Pino log level; defaults to `info`                                  |
-| `AI_BASE_URL`           | Required AI provider API base URL                                   |
-| `API_KEY`               | Required AI provider API key; never put it in prompts or logs       |
-| `AI_MODEL`              | Required model identifier accepted by the selected provider         |
-| `AI_API_FORMAT`         | API format: `openai-compatible` (default) or `anthropic`            |
+| Variable                | Purpose                                                         |
+| ----------------------- | --------------------------------------------------------------- |
+| `BOT_TOKEN`             | Telegram Bot API token                                          |
+| `API_ID`, `API_HASH`    | Telegram MTProto application credentials                        |
+| `TELEGRAM_USER_SESSION` | Authenticated owner session for reading private channel history |
+| `STORAGE_CHANNEL_ID`    | Private channel holding original media messages                 |
+| `MANAGEMENT_CHANNEL_ID` | Private channel holding entity and audit messages               |
+| `OWNER_ID`              | Numeric Telegram ID of the owner                                |
+| `WEBHOOK_URL`           | Public HTTPS webhook URL ending in `/telegram/webhook`          |
+| `WEBHOOK_SECRET`        | Random secret used to authenticate Telegram webhook requests    |
+| `PORT`                  | Health/status listener port; defaults to `3000`                 |
+| `NODE_ENV`              | Runtime environment                                             |
+| `LOG_LEVEL`             | Pino log level; defaults to `info`                              |
+| `AI_BASE_URL`           | Required AI provider API base URL                               |
+| `API_KEY`               | Required AI provider API key; never put it in prompts or logs   |
+| `AI_MODEL`              | Required model identifier accepted by the selected provider     |
+| `AI_API_FORMAT`         | API format: `openai-compatible` (default) or `anthropic`        |
 
 Telegram updates are delivered through a webhook; long polling is not used.
-Set `WEBHOOK_URL` to the exact public HTTPS endpoint for this instance, unless
-the app is running on Render where it can be derived from `RENDER_EXTERNAL_URL`.
+Set `WEBHOOK_URL` to the exact public HTTPS endpoint for this instance.
 Generate a private webhook secret with `openssl rand -hex 32` and store it in
 the deployment's private environment settings. When using `.env.example`, remove
 the leading `#` from both webhook entries and replace the example values. The
@@ -44,31 +43,12 @@ Telegram's requests. A sleeping host may delay processing until it wakes.
 Each process restart rebuilds the channel-backed index and clears temporary
 in-memory interactions, just as any other restart does.
 
-## Deploy the Docker service on Render
+## Cloud deployment
 
-The repository includes a Render Blueprint in `render.yaml`. In Render, create
-a Blueprint from this repository and provide the requested secret environment
-values. The Blueprint builds `docker/Dockerfile`, uses `/health` for service
-health checks, and sets `NODE_ENV=production`. Render supplies the listening
-`PORT` and `RENDER_EXTERNAL_URL`; the container listens on `PORT`, and MiniStore
-derives its HTTPS Telegram webhook URL from the Render URL. Set
-`WEBHOOK_SECRET` to a private 32-256 character value. `WEBHOOK_URL` is optional
-on Render; set it only if using a custom public domain.
-
-Provide valid values for `BOT_TOKEN`, `API_ID`, `API_HASH`,
-`TELEGRAM_USER_SESSION`, `STORAGE_CHANNEL_ID`, `MANAGEMENT_CHANNEL_ID`,
-`OWNER_ID`, `WEBHOOK_SECRET`, `AI_BASE_URL`, `API_KEY`, and `AI_MODEL` in
-Render's environment settings. Use a valid HTTPS AI provider URL in production.
-Do not commit these values or put them in the Blueprint.
-
-MiniStore stores durable state in Telegram channels, not the container
-filesystem, so a persistent disk is not required. Run exactly one instance:
-multiple replicas have independent in-memory indexes and can overwrite the
-Telegram webhook URL. When migrating an existing Render deployment, stop the
-old service before starting the Docker service with the same bot token. Then
-wait for `/health` to return `200` and confirm Telegram updates reach the bot.
-Render deployments can restart the container; the app recovers its index from
-the Management Channel on startup.
+For provider-neutral instructions to deploy MiniStore using Node.js/npm or
+Docker, configure health checks and secrets, or migrate an existing service,
+see the [cloud deployment guide](./cloud-deployment.md). It covers the required
+cloud fields and safe single-instance webhook setup.
 
 ### Test a local webhook with ngrok
 
