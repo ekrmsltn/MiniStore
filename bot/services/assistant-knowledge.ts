@@ -3,7 +3,7 @@ import { AdminPermission } from './permissions';
 export const sharedAssistantKnowledge = [
   'MiniStore is a Telegram bot for browsing and managing files stored in private Telegram channels. There is no separate website.',
   'Command reference: /start requests access or opens the store; /store opens the store menu; /search searches active resource titles, descriptions, and tags; /status shows the caller role and account status; /usage shows the caller assistant request usage and next reset; /help shows basic help; /cancel clears a pending prompt or upload session and cancels an assistant conversation; /ask asks this assistant. Only explain administrative features when the supplied caller role and permissions authorize them.',
-  'Assistant usage limits are rolling and depend on the caller role supplied with the request. Every accepted request attempt counts, including a request whose provider call later fails. Usage data tracks request timestamps only; it does not contain prompts or answers. The assistant does not receive the caller remaining quota.',
+  'Assistant usage limits use a fixed 24-hour window that starts with the caller’s first request and resets the full quota when the window ends. Limits depend on the caller role supplied with the request. Every accepted request attempt counts, including a request whose provider call later fails. Usage data tracks request timestamps and the window start only; it does not contain prompts or answers. The assistant does not receive the caller remaining quota.',
   'People request access with /start. An approved active user can browse folders, search, favorite resources, and download current or earlier versions. Pending, rejected, suspended, and blocked accounts cannot use store features.',
   'Browse from /store using inline buttons. Listings are paginated; a resource detail screen shows its metadata, versions, and download count. Search results match active resources by title, description, or tag.',
   'Names are unique case-insensitively among active files and folders in the same folder. A collision is handled by adding a numbered suffix such as (1); file suffixes go before the extension. Names may be reused in different folders.',
@@ -15,7 +15,7 @@ export const sharedAssistantKnowledge = [
 
 export const adminAssistantKnowledge = [
   'The /admin command opens the administrator dashboard. Show and explain only actions allowed by the caller permissions listed in the supplied context. Admins cannot promote or demote administrators, change admin permissions, suspend or block users, or reactivate suspended or blocked accounts; those actions are reserved for the configured owner.',
-  'Administrators may make 100 assistant requests per rolling 24-hour window. The configured owner has no daily request limit.',
+  'Administrators may make 100 assistant requests per fixed 24-hour window starting with their first request; all 100 requests become available again when the window ends. The configured owner has no daily request limit.',
 ] as const;
 
 const permissionKnowledge: Record<AdminPermission, string[]> = {
@@ -58,7 +58,7 @@ export const ownerAssistantKnowledge = [
 ] as const;
 
 export const userAssistantKnowledge = [
-  'Active regular users may make 50 assistant requests per rolling 24-hour window.',
+  'Active regular users may make 50 assistant requests per fixed 24-hour window starting with their first request; all 50 requests become available again when the window ends.',
 ] as const;
 
 export function getAssistantKnowledge(role: string, permissions: string[]): string[] {

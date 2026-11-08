@@ -62,7 +62,10 @@ The assistant can search current active resources and offer an in-chat
 not list tags or resource IDs in its answers. See the dedicated
 [AI assistant guide](./ai-assistant.md) for role behavior, resource matching
 and delivery, provider data handling, privacy, request limits, configuration,
-and troubleshooting.
+and troubleshooting. The configured owner can also ask about user accounts:
+the bot masks stored names, usernames, and Telegram IDs from AI requests and
+conversation history, then resolves pseudonymous references locally so the
+owner sees stored display names and public usernames in the final reply.
 
 ## Browsing and searching
 

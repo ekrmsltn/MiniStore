@@ -112,6 +112,7 @@ rebuilt later; it is a cache, not the source of truth.
 | `resource_version` | Historical file metadata and Storage Channel references                 |
 | `audit`            | Actor, action, target, metadata, and timestamp                          |
 | `session`          | Legacy record accepted for reading historical channel messages          |
+| `assistant_usage`  | Per-account request timestamps and fixed quota-window start             |
 
 Media is stored separately as messages in the Storage Channel. A resource
 refers to a storage message ID and Telegram file ID. Do not delete or repost a
@@ -227,10 +228,15 @@ configured owner and active, approved users/admins can ask questions; build
 caller-scoped aggregate context using the caller's current permissions before
 making a provider request. Do not send
 other users' names, Telegram identifiers, raw audit entities, `.env` values,
-or per-user activity. For a direct owner-identity question only, include the
-configured owner's saved display name and validated public username if
-available; do not include the owner ID or owner-only guidance. Refresh the
-owner profile from Telegram when the owner sends `/start`. For resource
+or per-user activity. For owner-only account questions, locally match exact
+stored display names and public usernames, then mask matched names, usernames,
+and Telegram IDs before provider requests and conversation storage. Provide
+only pseudonymous references and selected role, status, granted permission,
+and creation-date facts to the model. Resolve returned references to saved
+display names and public usernames only in the final Telegram response; never
+return Telegram IDs. Apply the same local resolution to direct owner-identity
+questions. Refresh the owner profile from Telegram when the owner sends
+`/start`. For resource
 questions, query the current active in-memory catalog each request and send at
 most eight ranked records with their MiniStore resource IDs and bounded,
 user-visible metadata. Exclude soft-deleted resources, Telegram storage IDs,
@@ -259,6 +265,13 @@ snapshot before creating a Download button. Strip markers, IDs, and tag-list
 output before replying or storing the conversation turn. Never expose the
 internal resource ID in user-facing text. Test metadata matching, marker
 validation, deleted-item exclusion, answer sanitization, and truncation.
+Pseudonymous user references must be process-scoped and contain no reversible
+user ID. Never persist the local identity-to-reference mapping; conversation
+history may retain aliases and non-identifying facts but never profile names,
+usernames, or Telegram IDs. Test masking in the current question and prior
+turns, owner-only access to user facts, final-response identity resolution,
+and absence of actual identity values from provider requests and conversation
+history.
 Assistant conversation turns are process-memory-only, bounded to five recent
 question/answer pairs, and expire after 30 minutes without a follow-up.
 `cancelAssistantConversation` must clear this state and abort the caller's

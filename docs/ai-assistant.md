@@ -36,9 +36,32 @@ not claims in a question:
 
 The assistant does not disclose owner-only workflows to regular users or
 admins without the necessary permissions. A direct question about the
-configured owner's identity may include the owner's saved display name and
-validated public Telegram username, if available. The bot refreshes this saved
-profile when the owner sends `/start`.
+configured owner's identity may be answered with the owner's saved display
+name and validated public Telegram username, if available. The bot refreshes
+this saved profile when the owner sends `/start`. Actual profile values are
+added locally to the final reply rather than sent to the AI provider. For
+non-owner callers, the provider receives only a pseudonymous reference for
+this lookup, not the owner's role, status, permissions, or creation date.
+
+For owner-only questions about user accounts, the bot can match an exact
+stored display name or public username locally. It masks matched names,
+usernames, and Telegram IDs before sending the question to the AI. The AI sees
+only pseudonymous references and selected account facts: role,
+status, granted admin permissions, and creation date. Broad account questions
+include at most 30 profile references per request. When answering the owner,
+the bot replaces each account reference in the final Telegram reply with the
+stored display name and public username, but never a Telegram ID. The owner
+can therefore see the real saved identity and the available account facts;
+masking applies only to provider requests and stored assistant conversation
+history. Those real identity values are not included in the provider request
+or saved in assistant conversation history; only pseudonymous references and
+non-identifying answer text are retained in the short-lived conversation.
+References use a random process-local key and cease to be stable when the bot
+restarts. The AI determines the response structure and which requested account
+facts to include. Locally, the bot only substitutes pseudonymous references
+with the saved display name and clickable public username; it does not
+generate a fixed profile block, so count-only questions stay focused. Username
+links open the corresponding `t.me` profile.
 
 Use the **🤖 Ask assistant** button in `/store`, `/ask` to enter a question,
 or `/ask <question>` to ask directly. After an answer, send another plain-text
@@ -92,13 +115,17 @@ on the question and the caller's permissions, a request can contain:
   `view_audit_logs`.
 - For relevant questions, up to eight matching current resource records as
   described above.
-- The configured owner's saved public name and username only for a direct
-  owner-identity question or recognized identity follow-up.
+- For owner-only account questions, pseudonymous references and selected
+  account facts, as described above. A direct owner-identity question uses the
+  same local resolution and does not send the owner's name or username.
 
 The assistant does not receive provider credentials in its prompt, `.env`
-contents, Telegram bot or user IDs, raw audit records, other users' names or
-individual activity, Telegram channel history, or source files. Current
-assistant usage counts are not included in the prompt.
+contents, Telegram bot or user IDs, user profile names, usernames, Telegram
+IDs, raw audit records, or other users' individual
+activity, Telegram channel history, or source files. For owner-only account
+lookups, the prompt contains pseudonymous references and selected account
+facts, never actual profile identity values. Current assistant usage counts
+are not included in the prompt.
 
 Questions and the listed context leave the MiniStore process and are subject
 to the configured provider's data handling, retention, and privacy policies.
@@ -129,14 +156,15 @@ configured owner can view the all-account AI usage overview.
 
 - Maximum question length: 1,500 characters.
 - Per-user cooldown: 10 seconds between requests for admins and regular users.
-- Rolling 24-hour quota: 50 requests for users, 100 for admins, unlimited for
-  the configured owner.
+- Fixed 24-hour quota window starting with the user's first request: 50
+  requests for users, 100 for admins, unlimited for the configured owner. The
+  full quota resets when that window ends.
 - Provider request timeout: 30 seconds.
 - Provider completion limit: 800 tokens; the returned answer is limited to
   3,800 characters before Telegram formatting.
 
-The `/usage` command and assistant reply footer show usage and the next
-available request slot. Limit errors include the next available time in UTC.
+The `/usage` command and assistant reply footer show usage and the quota reset
+time. Limit errors include the reset time in UTC.
 
 Provider, validation, access, and rate-limit errors are handled with safe
 user-facing messages. Provider response bodies are not logged or shown to the

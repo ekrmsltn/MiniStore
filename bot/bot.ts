@@ -521,9 +521,9 @@ function formatAssistantUsage(usage: AssistantUsageStatus): string {
   }
 
   const reset = usage.resetsAt
-    ? ` Next request slot resets at ${usage.resetsAt.toISOString()} (UTC).`
+    ? ` Your quota resets at ${usage.resetsAt.toISOString()} (UTC).`
     : '';
-  return `Assistant usage (rolling 24 hours): ${usage.used}/${usage.limit} used; ${usage.remaining} remaining.${reset}`;
+  return `Assistant usage (fixed 24-hour window): ${usage.used}/${usage.limit} used; ${usage.remaining} remaining.${reset}`;
 }
 
 function getAssistantResourceKeyboard(resourceIds: string[]): InlineKeyboard | undefined {

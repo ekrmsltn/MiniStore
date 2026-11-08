@@ -42,6 +42,7 @@ describe('AI assistant service', () => {
         id: `assistant_usage:${number}`;
         telegramId: number;
         requestTimestamps: string[];
+        windowStartedAt?: string;
         createdAt: string;
         updatedAt: string;
       }
@@ -51,6 +52,17 @@ describe('AI assistant service', () => {
   function getContextFromRequest(callIndex = 0): {
     role: string;
     permissions: string[];
+    currentUsers?: {
+      totalCount: number;
+      truncated: boolean;
+      items: Array<{
+        reference: string;
+        role?: string;
+        status?: string;
+        permissions?: string[];
+        createdAt?: string;
+      }>;
+    };
     currentResources?: {
       activeCount: number;
       matchCount: number;
@@ -238,19 +250,33 @@ describe('AI assistant service', () => {
         type: 'assistant_usage',
         telegramId: user.telegramId,
         requestTimestamps: [expect.any(String)],
+        windowStartedAt: expect.any(String),
       }),
     );
     expect(JSON.stringify(index.saveEntity.mock.calls[0][0])).not.toContain('How do I browse?');
   });
 
-  it('shares only the configured owner public profile when identity is asked', async () => {
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({ choices: [{ message: { content: 'The owner is MiniStore Owner.' } }] }),
+  it('resolves owner identity locally without sending profile details to the provider', async () => {
+    fetchMock.mockImplementation(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      const prompt = body.messages.find((message: { role: string }) => message.role === 'user')
+        .content as string;
+      const contextStart = prompt.indexOf('\n') + 1;
+      const contextEnd = prompt.indexOf('\nRecent conversation');
+      const context = JSON.parse(prompt.slice(contextStart, contextEnd));
+      const reference = context.currentUsers.items[0].reference;
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: `The owner is ${reference}.` } }],
+        }),
+      };
     });
     const { askAssistant } = await import('../services/assistant');
 
-    await askAssistant(user.telegramId, 'Who is the owner?');
+    await expect(askAssistant(user.telegramId, 'Who is the owner?')).resolves.toBe(
+      'The owner is **MiniStore Owner** [@ministore_owner](https://t.me/ministore_owner).',
+    );
 
     const userPrompt = JSON.parse(fetchMock.mock.calls[0][1].body).messages.find(
       (message: { role: string }) => message.role === 'user',
@@ -261,14 +287,225 @@ describe('AI assistant service', () => {
 
     expect(context.role).toBe('user');
     expect(context.permissions).toEqual([]);
-    expect(context.ownerProfile).toEqual({
-      displayName: 'MiniStore Owner',
-      username: '@ministore_owner',
-    });
+    expect(context.currentUsers.items).toEqual([
+      { reference: context.currentUsers.items[0].reference },
+    ]);
+    expect(userPrompt).toContain(context.currentUsers.items[0].reference);
+    expect(userPrompt).not.toContain('MiniStore Owner');
+    expect(userPrompt).not.toContain('ministore_owner');
     expect(JSON.stringify(context)).not.toContain('"telegramId"');
     expect(JSON.stringify(context)).not.toContain('"user:1"');
     expect(userPrompt).not.toContain('Only the configured owner can promote');
     expect(userPrompt).not.toContain('For Docker operations');
+  });
+
+  it('masks owner-targeted user profiles from provider prompts and conversation history', async () => {
+    const targetUser = createMockUser({
+      id: 'user:222',
+      telegramId: 222,
+      username: 'alice_example',
+      firstName: 'Alice',
+      lastName: 'Example',
+      role: 'admin',
+      permissions: ['manage_users'],
+      createdAt: '2024-02-03T10:00:00.000Z',
+    });
+    index.getUsers.mockReturnValue([targetUser, owner]);
+    fetchMock.mockImplementation(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      const prompt = body.messages.find((message: { role: string }) => message.role === 'user')
+        .content as string;
+      const contextStart = prompt.indexOf('\n') + 1;
+      const contextEnd = prompt.indexOf('\nRecent conversation');
+      const context = JSON.parse(prompt.slice(contextStart, contextEnd));
+      const reference = context.currentUsers.items[0].reference;
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: `${reference} has manage_users.` } }],
+        }),
+      };
+    });
+    const { askAssistant } = await import('../services/assistant');
+
+    await expect(
+      askAssistant(owner.telegramId, 'What permissions does @alice_example have?'),
+    ).resolves.toBe(
+      '**Alice Example** [@alice_example](https://t.me/alice_example) has manage_users.',
+    );
+
+    const firstPrompt = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const firstContext = getContextFromRequest();
+    const reference = firstContext.currentUsers?.items[0]?.reference;
+    expect(reference).toMatch(/^USER_[A-F0-9]{12}$/);
+    expect(JSON.stringify(firstPrompt)).not.toContain('Alice Example');
+    expect(JSON.stringify(firstPrompt)).not.toContain('alice_example');
+    expect(JSON.stringify(firstPrompt)).not.toContain('"telegramId":222');
+    expect(firstContext.currentUsers?.items).toEqual([
+      {
+        reference,
+        role: 'admin',
+        status: 'active',
+        permissions: ['manage_users'],
+        createdAt: '2024-02-03',
+      },
+    ]);
+
+    await askAssistant(owner.telegramId, 'What is their status?');
+    const secondPrompt = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(JSON.stringify(secondPrompt)).not.toContain('Alice Example');
+    expect(JSON.stringify(secondPrompt)).not.toContain('alice_example');
+    expect(JSON.stringify(secondPrompt)).not.toContain('"telegramId":222');
+    expect(JSON.stringify(secondPrompt)).toContain(reference);
+  });
+
+  it('provides available account facts for broad owner questions about users', async () => {
+    const targetUser = createMockUser({
+      id: 'user:222',
+      telegramId: 222,
+      username: 'alice_example',
+      firstName: 'Alice',
+      lastName: 'Example',
+      role: 'admin',
+      permissions: ['manage_users'],
+      createdAt: '2024-02-03T10:00:00.000Z',
+    });
+    index.getUsers.mockReturnValue([targetUser, owner]);
+    fetchMock.mockImplementation(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      const prompt = body.messages.find((message: { role: string }) => message.role === 'user')
+        .content as string;
+      const contextStart = prompt.indexOf('\n') + 1;
+      const contextEnd = prompt.indexOf('\nRecent conversation');
+      const context = JSON.parse(prompt.slice(contextStart, contextEnd));
+      const accountSummaries = context.currentUsers.items
+        .map(
+          (profile: {
+            reference: string;
+            role: string;
+            status: string;
+            permissions: string[];
+            createdAt: string;
+          }) =>
+            `${profile.reference}: role ${profile.role}, status ${profile.status}, permissions ${profile.permissions.join(', ') || 'none'}, created ${profile.createdAt}.`,
+        )
+        .join('\n');
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: accountSummaries } }],
+        }),
+      };
+    });
+    const { askAssistant } = await import('../services/assistant');
+
+    const answer = await askAssistant(owner.telegramId, 'What can you tell me about the users?');
+
+    const prompt = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const context = getContextFromRequest();
+    expect(context.currentUsers?.items).toHaveLength(2);
+    expect(context.currentUsers?.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'admin',
+          status: 'active',
+          permissions: ['manage_users'],
+          createdAt: '2024-02-03',
+        }),
+      ]),
+    );
+    expect(prompt.messages[0].content).toContain(
+      'answer from the supplied records and fields instead of claiming you have no user or account details',
+    );
+    expect(prompt.messages[0].content).toContain(
+      'include its exact supplied pseudonymous reference so the bot can replace it locally',
+    );
+    expect(answer).toContain('**Alice Example** [@alice_example](https://t.me/alice_example)');
+    expect(answer).toContain(
+      '**MiniStore Owner** [@ministore_owner](https://t.me/ministore_owner)',
+    );
+    expect(answer).toContain('role admin, status active, permissions manage_users');
+    const { formatAssistantResponse } = await import('../services/assistant');
+    expect(formatAssistantResponse(answer)).toContain(
+      '<a href="https://t.me/alice_example">@alice_example</a>',
+    );
+    expect(answer).not.toContain('USER_');
+    expect(JSON.stringify(prompt)).not.toContain('Alice Example');
+    expect(JSON.stringify(prompt)).not.toContain('alice_example');
+    expect(JSON.stringify(prompt)).not.toContain('"telegramId":222');
+
+    await askAssistant(owner.telegramId, 'Tell me more about those accounts.');
+    const followUpPrompt = JSON.stringify(JSON.parse(fetchMock.mock.calls[1][1].body));
+    expect(followUpPrompt).not.toContain('Alice Example');
+    expect(followUpPrompt).not.toContain('alice_example');
+    expect(followUpPrompt).not.toContain('MiniStore Owner');
+    expect(followUpPrompt).not.toContain('ministore_owner');
+  });
+
+  it('keeps owner account count answers focused instead of expanding every profile', async () => {
+    const targetUser = createMockUser({
+      id: 'user:222',
+      telegramId: 222,
+      username: 'alice_example',
+      firstName: 'Alice',
+      lastName: 'Example',
+      role: 'admin',
+      permissions: ['manage_users'],
+    });
+    index.getUsers.mockReturnValue([targetUser, owner]);
+    fetchMock.mockImplementation(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      const prompt = body.messages.find((message: { role: string }) => message.role === 'user')
+        .content as string;
+      const contextStart = prompt.indexOf('\n') + 1;
+      const contextEnd = prompt.indexOf('\nRecent conversation');
+      const context = JSON.parse(prompt.slice(contextStart, contextEnd));
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: `There are ${context.currentUsers.totalCount} user accounts.`,
+              },
+            },
+          ],
+        }),
+      };
+    });
+    const { askAssistant } = await import('../services/assistant');
+
+    await expect(askAssistant(owner.telegramId, 'How many users are there?')).resolves.toBe(
+      'There are 2 user accounts.',
+    );
+  });
+
+  it('does not expose other users identities to non-owner assistant callers', async () => {
+    const targetUser = createMockUser({
+      id: 'user:222',
+      telegramId: 222,
+      username: 'alice_example',
+      firstName: 'Alice',
+      lastName: 'Example',
+      role: 'admin',
+      permissions: ['manage_users'],
+    });
+    index.getUsers.mockReturnValue([targetUser, owner, user]);
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: 'I cannot provide other users’ private details.' } }],
+      }),
+    });
+    const { askAssistant } = await import('../services/assistant');
+
+    await askAssistant(user.telegramId, 'What permissions does @alice_example have?');
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(JSON.stringify(body)).not.toContain('Alice Example');
+    expect(JSON.stringify(body)).not.toContain('alice_example');
+    expect(JSON.stringify(body)).not.toContain('"telegramId":222');
+    expect(getContextFromRequest().currentUsers).toBeUndefined();
   });
 
   it('does not send owner identity on unrelated questions or trust role claims', async () => {
@@ -416,6 +653,7 @@ describe('AI assistant service', () => {
       askAssistantWithResources(owner.telegramId, 'Find a beginner Python resource'),
     ).resolves.toEqual({
       answer: 'Python Basics is a good match.',
+      conversationAnswer: 'Python Basics is a good match.',
       resourceIds: ['resource:python-guide'],
     });
 
@@ -465,6 +703,7 @@ describe('AI assistant service', () => {
       askAssistantWithResources(user.telegramId, 'Find the active guide'),
     ).resolves.toEqual({
       answer: 'I found a matching resource. Use the Download button below.',
+      conversationAnswer: 'I found a matching resource. Use the Download button below.',
       resourceIds: ['resource:active-match'],
     });
   });
@@ -489,6 +728,7 @@ describe('AI assistant service', () => {
       askAssistantWithResources(owner.telegramId, 'Find a Python resource'),
     ).resolves.toEqual({
       answer: 'Python Basics looks like a match.',
+      conversationAnswer: 'Python Basics looks like a match.',
       resourceIds: ['resource:python-guide'],
     });
   });
@@ -699,7 +939,7 @@ describe('AI assistant service', () => {
     expect(modelContent).not.toContain('TELEGRAM_USER_SESSION=');
   });
 
-  it('limits regular users to 50 requests in a rolling 24-hour window', async () => {
+  it('limits regular users to 50 requests in a fixed 24-hour window from first use', async () => {
     vi.useFakeTimers();
     const now = Date.now();
     vi.setSystemTime(now);
@@ -712,6 +952,7 @@ describe('AI assistant service', () => {
         requestTimestamps: Array.from({ length: 50 }, (_, index) =>
           new Date(now - (49 - index) * 60_000).toISOString(),
         ),
+        windowStartedAt: new Date(now - 49 * 60_000).toISOString(),
         createdAt: new Date(now - 24 * 60 * 60 * 1_000).toISOString(),
         updatedAt: new Date(now).toISOString(),
       };
@@ -731,7 +972,7 @@ describe('AI assistant service', () => {
     }
   });
 
-  it('limits administrators to 100 requests in a rolling 24-hour window', async () => {
+  it('limits administrators to 100 requests in a fixed 24-hour window from first use', async () => {
     index.getUserByTelegramId.mockReturnValue(
       createMockUser({
         id: `user:${user.telegramId}`,
@@ -748,6 +989,7 @@ describe('AI assistant service', () => {
       requestTimestamps: Array.from({ length: 100 }, (_, index) =>
         new Date(now - (99 - index) * 60_000).toISOString(),
       ),
+      windowStartedAt: new Date(now - 99 * 60_000).toISOString(),
       createdAt: new Date(now - 24 * 60 * 60 * 1_000).toISOString(),
       updatedAt: new Date(now).toISOString(),
     };
@@ -759,33 +1001,44 @@ describe('AI assistant service', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('releases regular-user quota when the oldest request leaves the rolling window', async () => {
+  it('resets the full regular-user quota at the fixed 24-hour boundary', async () => {
     vi.useFakeTimers();
     try {
       const now = Date.now();
       vi.setSystemTime(now);
+      const windowStartedAt = now - 23 * 60 * 60 * 1_000;
       assistantUsage = {
         type: 'assistant_usage',
         id: `assistant_usage:${user.telegramId}`,
         telegramId: user.telegramId,
         requestTimestamps: Array.from({ length: 50 }, (_, index) =>
-          new Date(now - 24 * 60 * 60 * 1_000 + 1_000 + index * 60_000).toISOString(),
+          new Date(windowStartedAt + index * 60_000).toISOString(),
         ),
-        createdAt: new Date(now - 24 * 60 * 60 * 1_000).toISOString(),
+        windowStartedAt: new Date(windowStartedAt).toISOString(),
+        createdAt: new Date(windowStartedAt).toISOString(),
         updatedAt: new Date(now).toISOString(),
       };
-      vi.setSystemTime(now + 2_000);
       fetchMock.mockResolvedValue({
         ok: true,
         json: async () => ({ choices: [{ message: { content: 'Allowed after expiry.' } }] }),
       });
       const { askAssistant } = await import('../services/assistant');
 
+      vi.setSystemTime(windowStartedAt + 24 * 60 * 60 * 1_000 - 1);
+      await expect(askAssistant(user.telegramId, 'Still within the quota window')).rejects.toThrow(
+        'limit of 50 assistant requests in 24 hours',
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      vi.setSystemTime(windowStartedAt + 24 * 60 * 60 * 1_000);
       await expect(askAssistant(user.telegramId, 'Try again after the window')).resolves.toBe(
         'Allowed after expiry.',
       );
       expect(index.updateEntity).toHaveBeenCalledOnce();
-      expect(assistantUsage?.requestTimestamps).toHaveLength(50);
+      expect(assistantUsage?.requestTimestamps).toHaveLength(1);
+      expect(assistantUsage?.windowStartedAt).toBe(
+        new Date(windowStartedAt + 24 * 60 * 60 * 1_000).toISOString(),
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -806,7 +1059,7 @@ describe('AI assistant service', () => {
     expect(index.updateEntity).not.toHaveBeenCalled();
   });
 
-  it('reports user usage and the next rolling reset time', async () => {
+  it('derives a fixed-window reset from the first request in legacy usage records', async () => {
     const now = Date.now();
     const firstRequest = new Date(now - 60 * 60 * 1_000).toISOString();
     const secondRequest = new Date(now - 30 * 60 * 1_000).toISOString();

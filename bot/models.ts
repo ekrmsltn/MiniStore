@@ -98,6 +98,7 @@ export interface AssistantUsageEntity extends BaseEntity {
   id: `assistant_usage:${number}`;
   telegramId: number;
   requestTimestamps: string[];
+  windowStartedAt?: string;
 }
 
 export type Entity =

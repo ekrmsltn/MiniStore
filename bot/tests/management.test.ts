@@ -53,6 +53,7 @@ describe('Management channel persistence', () => {
       id: 'assistant_usage:12345',
       telegramId: 12345,
       requestTimestamps: [new Date().toISOString()],
+      windowStartedAt: new Date().toISOString(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -62,6 +63,26 @@ describe('Management channel persistence', () => {
 
     const { getAllEntityRecords } = await import('../telegram/management');
     await expect(getAllEntityRecords()).resolves.toEqual([{ entity: usage, messageId: 14 }]);
+  });
+
+  it('rejects assistant usage records with an invalid quota window start', async () => {
+    mtprotoMocks.iterateChannelHistory.mockImplementation(async function* () {
+      yield {
+        id: 15,
+        message: JSON.stringify({
+          type: 'assistant_usage',
+          id: 'assistant_usage:12345',
+          telegramId: 12345,
+          requestTimestamps: [new Date().toISOString()],
+          windowStartedAt: 'not-a-date',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }),
+      };
+    });
+
+    const { getAllEntityRecords } = await import('../telegram/management');
+    await expect(getAllEntityRecords()).rejects.toThrow('not a valid MiniStore entity');
   });
 
   it('restores resource version records from channel history', async () => {

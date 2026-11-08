@@ -135,8 +135,11 @@ user data. For resource questions, up to eight matched active resource records
 are also sent to the provider, including internal MiniStore resource IDs and
 bounded catalog metadata; Telegram storage IDs and uploader IDs are excluded.
 The assistant does not display its internal IDs or tags to users. A direct
-question about the owner may include the owner's saved display name and public
-username.
+question about the owner is resolved locally, so the owner's actual name and
+username are not sent to the provider. For owner-only account questions, the
+provider receives pseudonymous profile references and selected role, status,
+permission, and creation-date facts; matched names, usernames, and Telegram IDs
+are masked locally and are not saved in conversation history.
 The assistant is read-only, has no tools to modify the store, and never
 receives Telegram credentials, `.env` contents, Telegram/user IDs, raw audit
 events, or individual user activity.
@@ -179,17 +182,18 @@ clear this short-lived memory; tell users to send `/cancel` to clear it
 immediately. Users should not include credentials or sensitive data in a
 question or follow-up.
 
-Assistant request limits are 50 per active user and 100 per admin over a
-rolling 24-hour window; the configured owner has no daily cap. Accepted request
-attempts count even if the provider later returns an error. Per-user usage
-timestamps (without prompts or answers) are persisted as `assistant_usage`
-records in the private Management Channel, so usage limits survive restarts.
+Assistant request limits are 50 per active user and 100 per admin in a fixed
+24-hour window that starts with each user's first request; the full quota
+resets when that window ends. The configured owner has no daily cap. Accepted
+request attempts count even if the provider later returns an error. Per-user
+usage timestamps and the window start (without prompts or answers) are
+persisted as `assistant_usage` records in the private Management Channel, so
+usage limits survive restarts.
 These records contain Telegram account IDs and request times; keep Management
 Channel access restricted. Current usage counts are not included in assistant
 prompts. Users can run `/usage` or read the usage footer on assistant replies
-to see their count, remaining requests, and next slot reset. Limit errors
-include the exact next available time in UTC; this is a rolling window rather
-than a single daily reset. The configured owner also has an **AI usage
+to see their count, remaining requests, and window reset time. Limit errors
+include the exact reset time in UTC. The configured owner also has an **AI usage
 overview** in the admin tools showing account status and per-account usage;
 this all-user view is owner-only and is not included in assistant prompts.
 

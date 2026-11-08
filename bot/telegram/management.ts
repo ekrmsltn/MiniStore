@@ -227,7 +227,10 @@ function isEntityRecord(value: unknown): value is Entity {
         Array.isArray(record.requestTimestamps) &&
         record.requestTimestamps.every(
           (timestamp) => typeof timestamp === 'string' && Number.isFinite(Date.parse(timestamp)),
-        )
+        ) &&
+        (record.windowStartedAt === undefined ||
+          (typeof record.windowStartedAt === 'string' &&
+            Number.isFinite(Date.parse(record.windowStartedAt))))
       );
     default:
       return false;
