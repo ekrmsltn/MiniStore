@@ -95,7 +95,10 @@ export function loadConfig(
   } = {},
 ): AppConfig {
   const telegramUserSession = process.env.TELEGRAM_USER_SESSION?.trim() || null;
-  const webhookUrl = process.env.WEBHOOK_URL?.trim() || null;
+  const renderExternalUrl = process.env.RENDER_EXTERNAL_URL?.trim().replace(/\/+$/, '');
+  const webhookUrl =
+    process.env.WEBHOOK_URL?.trim() ||
+    (renderExternalUrl ? `${renderExternalUrl}${TELEGRAM_WEBHOOK_PATH}` : null);
   const webhookSecret = process.env.WEBHOOK_SECRET?.trim() || null;
   const aiBaseUrl = process.env.AI_BASE_URL?.trim() || null;
   const apiKey = process.env.API_KEY?.trim() || null;

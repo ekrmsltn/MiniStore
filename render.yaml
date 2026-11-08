@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: ministore-bot
+    runtime: docker
+    dockerfilePath: ./docker/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BOT_TOKEN
+        sync: false
+      - key: API_ID
+        sync: false
+      - key: API_HASH
+        sync: false
+      - key: TELEGRAM_USER_SESSION
+        sync: false
+      - key: STORAGE_CHANNEL_ID
+        sync: false
+      - key: MANAGEMENT_CHANNEL_ID
+        sync: false
+      - key: OWNER_ID
+        sync: false
+      - key: WEBHOOK_SECRET
+        sync: false
+      - key: AI_BASE_URL
+        sync: false
+      - key: API_KEY
+        sync: false
+      - key: AI_MODEL
+        sync: false
+      - key: AI_API_FORMAT
+        value: openai-compatible

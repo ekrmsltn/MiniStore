@@ -160,6 +160,26 @@ describe('Configuration', () => {
       expect(loadConfig({ requireWebhook: false }).webhookUrl).toBeNull();
     });
 
+    it('derives the webhook URL from the Render service URL when no override is set', async () => {
+      delete process.env.WEBHOOK_URL;
+      process.env.RENDER_EXTERNAL_URL = 'https://ministore.example.onrender.com/';
+      vi.resetModules();
+      const { loadConfig } = await import('../config');
+
+      expect(loadConfig().webhookUrl).toBe(
+        'https://ministore.example.onrender.com/telegram/webhook',
+      );
+    });
+
+    it('prefers an explicit webhook URL over the Render service URL', async () => {
+      process.env.RENDER_EXTERNAL_URL = 'https://ministore.example.onrender.com';
+      process.env.WEBHOOK_URL = 'https://custom.example.com/telegram/webhook';
+      vi.resetModules();
+      const { loadConfig } = await import('../config');
+
+      expect(loadConfig().webhookUrl).toBe('https://custom.example.com/telegram/webhook');
+    });
+
     it('requires a public HTTPS webhook URL on the configured route', async () => {
       process.env.WEBHOOK_URL = 'http://ministore.example.test/telegram/webhook';
       vi.resetModules();

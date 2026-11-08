@@ -36,6 +36,8 @@ HTTPS `WEBHOOK_URL`, a random `WEBHOOK_SECRET`, and required AI provider
 settings (`AI_BASE_URL`, `API_KEY`, and `AI_MODEL`) first. The webhook URL
 must end in `/telegram/webhook`; see the
 [operations guide](./docs/operations.md#configuration-and-secrets).
+For Render Docker deployment, `WEBHOOK_URL` can be omitted; the app derives it
+from Render's `RENDER_EXTERNAL_URL`.
 MiniStore commands, files, and assistant conversations are restricted to
 private chats with the bot. Add the bot as an administrator in both channels
 and grant it permission to post.
