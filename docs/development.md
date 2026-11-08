@@ -261,10 +261,12 @@ documentation, environment, log, or channel-history access.
 Resource context must be freshly resolved per request, capped, and treated as
 untrusted data. The model may return selected resource IDs only in the
 machine-readable download marker; validate each ID against the current active
-snapshot before creating a Download button. Strip markers, IDs, and tag-list
-output before replying or storing the conversation turn. Never expose the
-internal resource ID in user-facing text. Test metadata matching, marker
-validation, deleted-item exclusion, answer sanitization, and truncation.
+snapshot before creating a Download button. Never expose IDs or dump metadata
+fields as a list in the user-facing answer. The assistant may mention a useful
+folder path or relevant search term when it helps locate a resource; it should
+not list tags by default. Keep markers and raw internal IDs out of replies and
+conversation history. Test metadata matching, marker validation,
+deleted-item exclusion, answer sanitization, and truncation.
 Pseudonymous user references must be process-scoped and contain no reversible
 user ID. Never persist the local identity-to-reference mapping; conversation
 history may retain aliases and non-identifying facts but never profile names,

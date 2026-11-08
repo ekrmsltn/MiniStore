@@ -59,7 +59,9 @@ Markdown formatting, with HTML from the provider escaped for Telegram.
 
 The assistant can search current active resources and offer an in-chat
 **Download** button for a match. It uses resource details internally and does
-not list tags or resource IDs in its answers. See the dedicated
+not dump metadata or list tags by default; it may give a helpful folder
+location or relevant search term when that helps find a file. It never shows
+resource IDs. See the dedicated
 [AI assistant guide](./ai-assistant.md) for role behavior, resource matching
 and delivery, provider data handling, privacy, request limits, configuration,
 and troubleshooting. The configured owner can also ask about user accounts:

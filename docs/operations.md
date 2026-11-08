@@ -195,7 +195,9 @@ troubleshooting—not source files, full documentation, logs, or live machine
 state. Resource metadata is looked up from the current active index for each
 resource question; deleted records are excluded and broad catalog results are
 capped at eight. Matching metadata and resource IDs are sent to the configured
-AI provider, but IDs and tag lists are removed from user-facing answers.
+AI provider, but IDs are never shown to users and metadata is not dumped in
+answers. The assistant may mention a useful folder path or relevant search
+term when it helps locate a resource; tags are not listed by default.
 Assistant-selected IDs are checked against the current snapshot before the bot
 offers an in-chat Download button. Keep this knowledge reviewed and updated
 with behavior or documentation changes; the model must acknowledge missing
