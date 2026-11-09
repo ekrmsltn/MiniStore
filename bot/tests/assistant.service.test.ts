@@ -177,7 +177,7 @@ describe('AI assistant service', () => {
     );
   });
 
-  it('keeps any Telegram-style command tappable instead of formatting it as inline code', async () => {
+  it('keeps known commands tappable and formats unknown slash text as inline code', async () => {
     const { formatAssistantResponse } = await import('../services/assistant');
 
     expect(
@@ -185,9 +185,21 @@ describe('AI assistant service', () => {
         'Use `/start`, `/custom_command`, `/search <query>`, or `/run2@my_test_bot arg` to continue. You can also try `first /help, then /store or /cancel`. Keep `foo()` and `path/to/file` as code.',
       ),
     ).toBe(
-      'Use /start, /custom_command, /search<code> &lt;query&gt;</code>, or /run2@my_test_bot<code> arg</code> to continue. ' +
+      'Use /start, <code>/custom_command</code>, /search<code> &lt;query&gt;</code>, or <code>/run2@my_test_bot arg</code> to continue. ' +
         'You can also try <code>first </code>/help<code>, then </code>/store<code> or </code>/cancel. ' +
         'Keep <code>foo()</code> and <code>path/to/file</code> as code.',
+    );
+  });
+
+  it('formats unknown commands outside code without altering paths or URLs', async () => {
+    const { formatAssistantResponse } = await import('../services/assistant');
+
+    expect(
+      formatAssistantResponse(
+        'Try /unknown and /start. The path is path/to/file and the URL is https://example.test/a/b.',
+      ),
+    ).toBe(
+      'Try <code>/unknown</code> and /start. The path is path/to/file and the URL is https://example.test/a/b.',
     );
   });
 

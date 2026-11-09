@@ -19,6 +19,20 @@ const MAX_CONVERSATION_MESSAGES = 10;
 const MAX_ASSISTANT_RESOURCE_RESULTS = 8;
 const MAX_ASSISTANT_RESOURCE_DESCRIPTION = 600;
 const MAX_ASSISTANT_USER_RESULTS = 30;
+const recognizedAssistantCommands = new Set([
+  'start',
+  'help',
+  'ask',
+  'usage',
+  'store',
+  'search',
+  'upload',
+  'cancel',
+  'status',
+  'admin',
+  'users',
+  'requests',
+]);
 const recentRequests = new Map<number, number>();
 const requestLocks = new Map<number, Promise<void>>();
 const userReferenceSecret = crypto.randomBytes(32);
@@ -970,11 +984,12 @@ export function formatAssistantResponse(answer: string): string {
     if (!placeholderPattern.test(restored)) break;
     placeholderPattern.lastIndex = 0;
   }
-  return restored.replace(/<code>([^<]*)<\/code>/gi, (_match, code: string) => {
-    const commandPattern = /(^|[^\w])\/[a-z0-9_]{1,32}(?:@[a-z0-9_]{5,32})?/gi;
+  const commandPattern = /(^|[^\w/;&])\/([a-z0-9_]{1,32})(@[a-z0-9_]{5,32})?(?![\w])/gi;
+  const formattedCode = restored.replace(/<code>([^<]*)<\/code>/gi, (_match, code: string) => {
     let result = '';
     let position = 0;
     for (const match of code.matchAll(commandPattern)) {
+      if (!recognizedAssistantCommands.has(match[2]!.toLowerCase())) continue;
       const command = match[0].slice(match[1]!.length);
       const commandStart = match.index! + match[1]!.length;
       const commandEnd = commandStart + command.length;
@@ -988,6 +1003,19 @@ export function formatAssistantResponse(answer: string): string {
     if (position < code.length) result += `<code>${code.slice(position)}</code>`;
     return result;
   });
+  return formattedCode
+    .split(
+      /(<pre\b[^>]*>[\s\S]*?<\/pre>|<code\b[^>]*>[\s\S]*?<\/code>|<a\b[^>]*>[\s\S]*?<\/a>|<[^>]+>)/gi,
+    )
+    .map((part) => {
+      if (part.startsWith('<')) return part;
+      return part.replace(commandPattern, (match, prefix: string, command: string) =>
+        recognizedAssistantCommands.has(command.toLowerCase())
+          ? match
+          : `${prefix}<code>/${command}${match.slice(prefix.length + command.length + 1)}</code>`,
+      );
+    })
+    .join('');
 }
 
 function splitMarkdownTableRow(row: string): string[] {
