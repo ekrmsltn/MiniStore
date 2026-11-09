@@ -9,8 +9,8 @@
     "build": "tsc",
     "start": "node dist/main.js",
     "mtproto:login": "tsx scripts/create-mtproto-session.ts",
-    "lint": "eslint bot.ts config.ts errors.ts health.ts logger.ts main.ts models.ts private-chat.ts webhook.ts services telegram",
-    "format": "prettier --write *.ts services telegram",
+    "lint": "eslint bot.ts config.ts errors.ts health.ts logger.ts main.ts models.ts private-chat.ts webhook.ts handlers services telegram",
+    "format": "prettier --write *.ts handlers services telegram",
     "test": "vitest run",
     "test:watch": "vitest"
   },

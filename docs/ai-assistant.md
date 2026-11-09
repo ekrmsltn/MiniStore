@@ -42,12 +42,18 @@ this saved profile when the owner sends `/start`. Actual profile values are
 added locally to the final reply rather than sent to the AI provider. For
 non-owner callers, the provider receives only a pseudonymous reference for
 this lookup, not the owner's role, status, permissions, or creation date.
+Callers can also ask who they are or what name is saved for their own account.
+The model writes the answer using a pseudonymous `current_caller` reference;
+the bot resolves it locally. Questions about the assistant itself are answered
+as the MiniStore help assistant.
 
 For owner-only questions about user accounts, the bot can match an exact
 stored display name or public username locally. It masks matched names,
 usernames, and Telegram IDs before sending the question to the AI. The AI sees
 only pseudonymous references and selected account facts: role,
-status, granted admin permissions, and creation date. Broad account questions
+status, granted admin permissions, and creation date. Each reference is labeled
+as the current caller, configured owner, or another account, without sending
+the identity itself. Broad account questions
 include at most 30 profile references per request. When answering the owner,
 the bot replaces each account reference in the final Telegram reply with the
 stored display name and public username, but never a Telegram ID. The owner
@@ -56,17 +62,25 @@ masking applies only to provider requests and stored assistant conversation
 history. Those real identity values are not included in the provider request
 or saved in assistant conversation history; only pseudonymous references and
 non-identifying answer text are retained in the short-lived conversation.
+Before saving a model response, the bot masks any known profile names,
+usernames, or Telegram IDs it echoes.
 References use a random process-local key and cease to be stable when the bot
 restarts. The AI determines the response structure and which requested account
 facts to include. Locally, the bot only substitutes pseudonymous references
-with the saved display name and clickable public username; it does not
-generate a fixed profile block, so count-only questions stay focused. Username
-links open the corresponding `t.me` profile.
+using the exact `[[MINISTORE_USER:USER_0123456789AB]]` marker with the saved
+display name and clickable public username; unrecognized or malformed markers
+are removed. This local parser does not generate a fixed profile block, so
+count-only questions stay focused. Username links open the corresponding
+`t.me` profile.
 
 Use the **🤖 Ask assistant** button in `/store`, `/ask` to enter a question,
 or `/ask <question>` to ask directly. After an answer, send another plain-text
 message to continue the conversation. Use `/cancel` to stop an in-flight
-request and clear the conversation. `/usage` shows your current request usage.
+request and clear the conversation. You can also edit one of your prompts that
+the assistant has answered: the bot generates a replacement answer and edits
+its previous reply. If you edit an earlier prompt, later turns based on the old
+version are removed from the conversation. `/usage` shows your current request
+usage.
 
 ## Resource search and delivery
 

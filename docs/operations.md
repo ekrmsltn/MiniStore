@@ -496,13 +496,16 @@ session from the configured environment.
 - The Management Channel is authoritative for user, folder, resource, version, and audit records. Each record is a JSON message. Folder and resource records may include a `deletionBatchId` while they are in the recycle bin; this links the active items moved together by one folder deletion and is cleared when restored. The field is optional so records written by older versions remain readable.
 - The Storage Channel is authoritative for original media messages.
 - The process-local in-memory index is rebuilt from Management Channel history at startup; it is not a backup.
-- MTProto reads channel history; the Bot API writes and edits messages. If required channel
-  access or index recovery fails, the health listener stays available but unready while startup
-  retries with an exponentially increasing delay capped at one minute. Channel access, index
-  recovery, and webhook registration must all succeed before Telegram updates are processed.
+- MTProto reads channel history; the Bot API writes and edits messages. If the initial Bot API
+  validation, required channel access, or index recovery fails, the health listener stays available
+  but unready while startup retries with an exponentially increasing delay capped at one minute.
+  Channel access, index recovery, and webhook registration must all succeed before Telegram
+  updates are processed.
 - Periodic consistency checks compare the index with channel data once per hour. A transient
-  check failure is logged without discarding an otherwise usable in-memory index; a failed rebuild
-  leaves the index unavailable until a later check can rebuild it.
+  check failure is logged without discarding an otherwise usable in-memory index. Before rebuilding,
+  MiniStore returns retryable `503` responses to new webhook requests and waits for active updates
+  to finish. A failed rebuild keeps updates paused and health unready; a later consistency check
+  retries the rebuild and resumes updates only after recovery succeeds.
 - If an upload reaches the Storage Channel but its metadata cannot be saved, MiniStore attempts to remove the unlinked media and logs cleanup failures. Telegram/network timeouts can leave the outcome unknown; check the store before retrying.
 - Bot update failures are logged and the bot attempts to send a generic error reply. Failure to
   deliver that reply is logged separately. Individual command or callback operations may provide
@@ -513,7 +516,9 @@ session from the configured environment.
   write, so confirm the current channel/store state before manually repeating
   an operation.
 
-There is no automated backup/restore command. Export both channels independently with Telegram Desktop, encrypt and store exports off-host, and back up `.env` separately using protected secret storage. If a Management Channel record is restored by reposting its JSON, it receives a new Telegram message ID; check entity references. If media is lost, restore it and update/re-upload the corresponding resource. Do not delete channel history as a troubleshooting shortcut.
+There is no automated, application-aware backup/restore command. Export both channels independently with Telegram Desktop for archival, encrypt the exports, store them off-host, and back up `.env` separately using protected secret storage. These exports are not a complete direct restore: reposted Management Channel records receive new Telegram message IDs, while resource and version records refer to Storage Channel message IDs. Reposting records without remapping those references can leave resources or media unusable.
+
+For an operational outage, keep the bot stopped while diagnosing the issue; do not delete or recreate either production channel as a troubleshooting step. If the original channels remain available, restore the bot and owner account's membership/permissions, correct the configuration, and start MiniStore so it can recover the index from the original history. If channel content was lost, preserve the exports and contact the project maintainer before reposting records or media; a complete recovery requires remapping Telegram message references, which MiniStore does not currently automate. Treat restore testing in isolated channels, with a migration/remapping procedure, as a prerequisite before relying on exports for disaster recovery.
 
 Old session records may remain in channel history for backward compatibility; the bot no longer creates or uses application sessions.
 

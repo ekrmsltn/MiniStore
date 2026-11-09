@@ -16,6 +16,7 @@ import {
 } from '../models';
 import { iterateEntityRecords, sendEntity, editEntity, deleteEntity } from './management';
 import logger from '../logger';
+import { pauseTelegramUpdates, resumeTelegramUpdates } from '../webhook';
 
 /**
  * Index maps entity IDs to their data and message IDs.
@@ -384,6 +385,13 @@ export function startConsistencyChecks(intervalMs = 3600 * 1000): () => void {
     if (checking) return;
     checking = true;
     try {
+      if (!index.isInitialized()) {
+        await pauseTelegramUpdates();
+        await index.rebuild();
+        resumeTelegramUpdates();
+        return;
+      }
+
       const result = await index.consistencyCheck();
       if (result.missing.length > 0 || result.extra.length > 0) {
         logger.info({
@@ -391,7 +399,9 @@ export function startConsistencyChecks(intervalMs = 3600 * 1000): () => void {
           extra: result.extra.length,
           msg: 'Rebuilding index due to channel/index discrepancies',
         });
+        await pauseTelegramUpdates();
         await index.rebuild();
+        resumeTelegramUpdates();
       }
     } catch (err) {
       logger.error({ err, msg: 'Consistency check failed' });

@@ -3,7 +3,7 @@
  * Tests CRUD operations, search, pagination, and consistency checks.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   setupEnv,
   resetEnv,
@@ -13,6 +13,9 @@ import {
   createMockAudit,
 } from './helpers';
 import { Entity } from '../models';
+
+const pauseTelegramUpdates = vi.fn().mockResolvedValue(undefined);
+const resumeTelegramUpdates = vi.fn();
 
 describe('Entity Index', () => {
   beforeEach(() => {
@@ -33,10 +36,21 @@ describe('Entity Index', () => {
       deleteEntity: vi.fn().mockResolvedValue(true),
       getEntity: vi.fn().mockResolvedValue(null),
     }));
+    pauseTelegramUpdates.mockClear();
+    resumeTelegramUpdates.mockClear();
+    vi.doMock('../webhook', () => ({
+      pauseTelegramUpdates,
+      resumeTelegramUpdates,
+    }));
   });
 
   afterAll(() => {
     resetEnv();
+  });
+
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
   });
 
   async function getIndex() {
@@ -479,6 +493,49 @@ describe('Entity Index', () => {
   });
 
   describe('Consistency check', () => {
+    it('pauses updates while rebuilding after a consistency discrepancy', async () => {
+      vi.useFakeTimers();
+      const idx = await getIndex();
+      const user = createMockUser();
+      idx.set(user, 1);
+      const management = await import('../telegram/management');
+      vi.mocked(management.getAllEntityRecords).mockResolvedValue([]);
+      const { startConsistencyChecks } = await import('../telegram/index');
+      const stopChecks = startConsistencyChecks(1_000);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(pauseTelegramUpdates).toHaveBeenCalledOnce();
+      expect(resumeTelegramUpdates).toHaveBeenCalledOnce();
+      expect(idx.get(user.id)).toBeUndefined();
+      expect(idx.isInitialized()).toBe(true);
+
+      stopChecks();
+    });
+
+    it('keeps updates paused after a failed rebuild and resumes after recovery', async () => {
+      vi.useFakeTimers();
+      const idx = await getIndex();
+      const management = await import('../telegram/management');
+      vi.mocked(management.getAllEntityRecords)
+        .mockRejectedValueOnce(new Error('temporary channel history failure'))
+        .mockResolvedValueOnce([]);
+      const { startConsistencyChecks } = await import('../telegram/index');
+      const stopChecks = startConsistencyChecks(1_000);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(pauseTelegramUpdates).toHaveBeenCalledOnce();
+      expect(resumeTelegramUpdates).not.toHaveBeenCalled();
+      expect(idx.isInitialized()).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(pauseTelegramUpdates).toHaveBeenCalledTimes(2);
+      expect(resumeTelegramUpdates).toHaveBeenCalledOnce();
+      expect(idx.isInitialized()).toBe(true);
+
+      stopChecks();
+    });
+
     it('should detect missing entities', async () => {
       const idx = await getIndex();
       idx.set(createMockUser(), 1);

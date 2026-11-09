@@ -57,6 +57,7 @@ describe('AI assistant service', () => {
       truncated: boolean;
       items: Array<{
         reference: string;
+        subject: 'current_caller' | 'configured_owner' | 'account';
         role?: string;
         status?: string;
         permissions?: string[];
@@ -268,7 +269,7 @@ describe('AI assistant service', () => {
       return {
         ok: true,
         json: async () => ({
-          choices: [{ message: { content: `The owner is ${reference}.` } }],
+          choices: [{ message: { content: `The owner is [[MINISTORE_USER:${reference}]].` } }],
         }),
       };
     });
@@ -288,7 +289,10 @@ describe('AI assistant service', () => {
     expect(context.role).toBe('user');
     expect(context.permissions).toEqual([]);
     expect(context.currentUsers.items).toEqual([
-      { reference: context.currentUsers.items[0].reference },
+      {
+        reference: context.currentUsers.items[0].reference,
+        subject: 'configured_owner',
+      },
     ]);
     expect(userPrompt).toContain(context.currentUsers.items[0].reference);
     expect(userPrompt).not.toContain('MiniStore Owner');
@@ -322,7 +326,7 @@ describe('AI assistant service', () => {
       return {
         ok: true,
         json: async () => ({
-          choices: [{ message: { content: `${reference} has manage_users.` } }],
+          choices: [{ message: { content: `[[MINISTORE_USER:${reference}]] has manage_users.` } }],
         }),
       };
     });
@@ -344,6 +348,7 @@ describe('AI assistant service', () => {
     expect(firstContext.currentUsers?.items).toEqual([
       {
         reference,
+        subject: 'account',
         role: 'admin',
         status: 'active',
         permissions: ['manage_users'],
@@ -359,6 +364,49 @@ describe('AI assistant service', () => {
     expect(JSON.stringify(secondPrompt)).toContain(reference);
   });
 
+  it('masks identities echoed by the model before retaining an owner conversation', async () => {
+    const targetUser = createMockUser({
+      id: 'user:222',
+      telegramId: 222,
+      username: 'alice_example',
+      firstName: 'Alice',
+      lastName: 'Example',
+      role: 'admin',
+      permissions: ['manage_users'],
+    });
+    index.getUsers.mockReturnValue([targetUser, owner]);
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: 'Alice Example has manage_users.' } }],
+      }),
+    });
+    const { askAssistant } = await import('../services/assistant');
+
+    await expect(
+      askAssistant(owner.telegramId, 'What permissions does @alice_example have?'),
+    ).resolves.toBe(
+      '**Alice Example** [@alice_example](https://t.me/alice_example) has manage_users.',
+    );
+
+    const firstRequest = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(JSON.stringify(firstRequest)).not.toContain('Alice Example');
+    expect(JSON.stringify(firstRequest)).not.toContain('alice_example');
+    expect(JSON.stringify(firstRequest)).not.toContain('MiniStore Owner');
+    expect(JSON.stringify(firstRequest)).not.toContain('ministore_owner');
+    expect(JSON.stringify(firstRequest)).not.toContain('"telegramId":222');
+    expect(JSON.stringify(firstRequest)).not.toContain('"telegramId":1');
+
+    await askAssistant(owner.telegramId, 'What is their status?');
+    const followUpRequest = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(JSON.stringify(followUpRequest)).not.toContain('Alice Example');
+    expect(JSON.stringify(followUpRequest)).not.toContain('alice_example');
+    expect(JSON.stringify(followUpRequest)).not.toContain('MiniStore Owner');
+    expect(JSON.stringify(followUpRequest)).not.toContain('ministore_owner');
+    expect(JSON.stringify(followUpRequest)).not.toContain('"telegramId":222');
+    expect(JSON.stringify(followUpRequest)).not.toContain('"telegramId":1');
+  });
+
   it('provides available account facts for broad owner questions about users', async () => {
     const targetUser = createMockUser({
       id: 'user:222',
@@ -370,6 +418,7 @@ describe('AI assistant service', () => {
       permissions: ['manage_users'],
       createdAt: '2024-02-03T10:00:00.000Z',
     });
+
     index.getUsers.mockReturnValue([targetUser, owner]);
     fetchMock.mockImplementation(async (_url, options) => {
       const body = JSON.parse(options.body);
@@ -415,10 +464,10 @@ describe('AI assistant service', () => {
       ]),
     );
     expect(prompt.messages[0].content).toContain(
-      'answer from the supplied records and fields instead of claiming you have no user or account details',
+      'When currentUsers is supplied, use only its privacy-filtered entries and fields',
     );
     expect(prompt.messages[0].content).toContain(
-      'include its exact supplied pseudonymous reference so the bot can replace it locally',
+      'include their exact reference using this exact marker syntax',
     );
     expect(answer).toContain('**Alice Example** [@alice_example](https://t.me/alice_example)');
     expect(answer).toContain(
@@ -440,6 +489,152 @@ describe('AI assistant service', () => {
     expect(followUpPrompt).not.toContain('alice_example');
     expect(followUpPrompt).not.toContain('MiniStore Owner');
     expect(followUpPrompt).not.toContain('ministore_owner');
+  });
+
+  it('lets the AI answer identity questions while keeping owner profile values local', async () => {
+    fetchMock.mockImplementation(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      const prompt = body.messages.find((message: { role: string }) => message.role === 'user')
+        .content as string;
+      const contextStart = prompt.indexOf('\n') + 1;
+      const contextEnd = prompt.indexOf('\nRecent conversation');
+      const context = JSON.parse(prompt.slice(contextStart, contextEnd));
+      const reference = context.currentUsers.items[0].reference;
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: `You're [[MINISTORE_USER:${reference}]] in this MiniStore account.`,
+              },
+            },
+          ],
+        }),
+      };
+    });
+    const { askAssistant } = await import('../services/assistant');
+
+    await expect(askAssistant(owner.telegramId, 'Who am I?')).resolves.toBe(
+      "You're **MiniStore Owner** [@ministore_owner](https://t.me/ministore_owner) in this MiniStore account.",
+    );
+
+    const firstRequest = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(JSON.stringify(firstRequest)).not.toContain('MiniStore Owner');
+    expect(JSON.stringify(firstRequest)).not.toContain('ministore_owner');
+    expect(JSON.stringify(firstRequest)).not.toContain('"telegramId":1');
+    expect(getContextFromRequest().currentUsers?.items[0]).toMatchObject({
+      subject: 'current_caller',
+    });
+
+    await askAssistant(owner.telegramId, 'What is my username?');
+    const followUpRequest = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(JSON.stringify(followUpRequest)).not.toContain('MiniStore Owner');
+    expect(JSON.stringify(followUpRequest)).not.toContain('ministore_owner');
+    expect(JSON.stringify(followUpRequest)).not.toContain('"telegramId":1');
+    expect(JSON.stringify(followUpRequest)).toContain('[[MINISTORE_USER:');
+  });
+
+  it('lets a regular caller ask about their own saved identity without exposing it to the provider', async () => {
+    const caller = createMockUser({
+      id: 'user:24680',
+      telegramId: 24680,
+      username: 'caller_handle',
+      firstName: 'Current',
+      lastName: 'Caller',
+      role: 'user',
+    });
+    index.getUsers.mockReturnValue([caller, owner]);
+    fetchMock.mockImplementation(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      const prompt = body.messages.find((message: { role: string }) => message.role === 'user')
+        .content as string;
+      const contextStart = prompt.indexOf('\n') + 1;
+      const contextEnd = prompt.indexOf('\nRecent conversation');
+      const context = JSON.parse(prompt.slice(contextStart, contextEnd));
+      const reference = context.currentUsers.items[0].reference;
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [
+            { message: { content: `Your saved profile is [[MINISTORE_USER:${reference}]].` } },
+          ],
+        }),
+      };
+    });
+    const { askAssistant } = await import('../services/assistant');
+
+    await expect(askAssistant(caller.telegramId, 'Who am I?')).resolves.toBe(
+      'Your saved profile is **Current Caller** [@caller_handle](https://t.me/caller_handle).',
+    );
+
+    const request = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(JSON.stringify(request)).not.toContain('Current Caller');
+    expect(JSON.stringify(request)).not.toContain('caller_handle');
+    expect(JSON.stringify(request)).not.toContain('"telegramId":24680');
+    expect(getContextFromRequest().currentUsers?.items[0]).toMatchObject({
+      subject: 'current_caller',
+    });
+  });
+
+  it('parses only valid identity markers and removes malformed or unknown references', async () => {
+    const targetUser = createMockUser({
+      id: 'user:222',
+      telegramId: 222,
+      username: 'alice_example',
+      firstName: 'Alice',
+      lastName: 'Example',
+      role: 'admin',
+      permissions: ['manage_users'],
+    });
+    const duplicateNameUser = createMockUser({
+      id: 'user:333',
+      telegramId: 333,
+      username: 'alice_two',
+      firstName: 'Alice',
+      lastName: 'Example',
+      role: 'user',
+    });
+    index.getUsers.mockReturnValue([targetUser, duplicateNameUser, owner]);
+    fetchMock.mockImplementation(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      const prompt = body.messages.find((message: { role: string }) => message.role === 'user')
+        .content as string;
+      const contextStart = prompt.indexOf('\n') + 1;
+      const contextEnd = prompt.indexOf('\nRecent conversation');
+      const context = JSON.parse(prompt.slice(contextStart, contextEnd));
+      const target = context.currentUsers.items.find(
+        (profile: { role: string }) => profile.role === 'admin',
+      );
+      const duplicateName = context.currentUsers.items.find(
+        (profile: { role: string }) => profile.role === 'user',
+      );
+      const configuredOwner = context.currentUsers.items.find(
+        (profile: { subject: string }) => profile.subject === 'current_caller',
+      );
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                content: `**Accounts:** [[MINISTORE_USER:${target.reference}]], then [[MINISTORE_USER:${duplicateName.reference}]] and [[MINISTORE_USER:${configuredOwner.reference}]]! Unknown [[MINISTORE_USER:USER_000000000000]], malformed [[MINISTORE_USER:not-valid]. Raw USER_BAD.`,
+              },
+            },
+          ],
+        }),
+      };
+    });
+    const { askAssistant } = await import('../services/assistant');
+
+    const answer = await askAssistant(owner.telegramId, 'Tell me about all users.');
+
+    expect(answer).toContain(
+      '**Alice Example** [@alice_example](https://t.me/alice_example), then **Alice Example** [@alice_two](https://t.me/alice_two) and **MiniStore Owner** [@ministore_owner](https://t.me/ministore_owner)!',
+    );
+    expect(answer).not.toContain('MINISTORE_USER');
+    expect(answer).not.toContain('USER_');
+    expect(answer).not.toContain('not-valid');
   });
 
   it('keeps owner account count answers focused instead of expanding every profile', async () => {
@@ -1252,6 +1447,68 @@ describe('AI assistant service', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('replaces later conversation turns when an earlier prompt is edited', async () => {
+    fetchMock.mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: `Answer ${fetchMock.mock.calls.length}.` } }],
+      }),
+    }));
+    const { askAssistantWithResources } = await import('../services/assistant');
+
+    await askAssistantWithResources(owner.telegramId, 'First prompt');
+    await askAssistantWithResources(owner.telegramId, 'A follow-up based on the first answer');
+    await askAssistantWithResources(owner.telegramId, 'Edited first prompt', {
+      conversationPrefixLength: 0,
+    });
+
+    const editedPromptRequest = JSON.parse(fetchMock.mock.calls[2][1].body);
+    const editedPrompt = editedPromptRequest.messages.find(
+      (message: { role: string }) => message.role === 'user',
+    ).content as string;
+    expect(editedPrompt).toContain('Recent conversation (JSON; use only for this conversation');
+    expect(editedPrompt).toContain('\n[]\nUser question:\nEdited first prompt');
+    expect(editedPrompt).not.toContain('First prompt');
+    expect(editedPrompt).not.toContain('A follow-up based on the first answer');
+
+    await askAssistantWithResources(owner.telegramId, 'Continue from the edited prompt');
+    const nextPromptRequest = JSON.parse(fetchMock.mock.calls[3][1].body);
+    const nextPrompt = nextPromptRequest.messages.find(
+      (message: { role: string }) => message.role === 'user',
+    ).content as string;
+    expect(nextPrompt).toContain('"user","content":"Edited first prompt"');
+    expect(nextPrompt).toContain('"assistant","content":"Answer 3."');
+    expect(nextPrompt).not.toContain('A follow-up based on the first answer');
+  });
+
+  it('uses absolute checkpoints after older conversation turns have been trimmed', async () => {
+    fetchMock.mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: `Answer ${fetchMock.mock.calls.length}.` } }],
+      }),
+    }));
+    const { askAssistantWithResources } = await import('../services/assistant');
+
+    for (let turn = 1; turn <= 6; turn += 1) {
+      await askAssistantWithResources(owner.telegramId, `Prompt ${turn}`);
+    }
+    await askAssistantWithResources(owner.telegramId, 'Revised prompt 4', {
+      conversationPrefixLength: 6,
+    });
+
+    const request = JSON.parse(fetchMock.mock.calls[6][1].body);
+    const prompt = request.messages.find((message: { role: string }) => message.role === 'user')
+      .content as string;
+    expect(prompt).toContain('"user","content":"Prompt 2"');
+    expect(prompt).toContain('"assistant","content":"Answer 2."');
+    expect(prompt).toContain('"user","content":"Prompt 3"');
+    expect(prompt).toContain('"assistant","content":"Answer 3."');
+    expect(prompt).not.toContain('Prompt 4');
+    expect(prompt).not.toContain('Prompt 5');
+    expect(prompt).not.toContain('Prompt 6');
   });
 
   it('expires conversation turns after 30 minutes of inactivity', async () => {

@@ -143,7 +143,8 @@ plugin, `docker compose` is the equivalent form. See the
 
 ```text
 bot/
-├── bot.ts              Telegram commands and interactions
+├── bot.ts              Bot setup and handler wiring
+├── handlers/           Assistant, upload, and interaction state modules
 ├── services/           users, resources, folders, permissions
 ├── telegram/           Telegram APIs, channels, and in-memory index
 ├── webhook.ts          Authenticated Telegram webhook endpoint

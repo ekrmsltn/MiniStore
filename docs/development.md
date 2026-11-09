@@ -11,7 +11,7 @@ configuration, and resource delivery, see the
 
 ```text
 bot/
-├── bot.ts                 Telegram commands, callbacks, and upload handling
+├── bot.ts                 Bot setup and handler wiring
 ├── config.ts              Environment loading and validation
 ├── errors.ts              Application and Telegram error types
 ├── health.ts              Operational HTTP endpoints
@@ -25,6 +25,14 @@ bot/
 │   ├── permissions.ts    Permission definitions and checks
 │   ├── resources.ts       Resource, version, and download lifecycle
 │   └── users.ts           Access requests, roles, permissions, favorites
+├── handlers/
+│   ├── assistant-ui.ts    Assistant reply formatting and conversation UI
+│   ├── callbacks.ts       Store and admin callback actions
+│   ├── commands.ts        User and admin command registration
+│   ├── screens.ts         Browse, resource, and admin screen rendering
+│   ├── state.ts           Process-local interaction state and action types
+│   ├── text-actions.ts    Follow-up text interactions
+│   └── uploads.ts         Upload prompts, callbacks, and media handling
 ├── telegram/
 │   ├── index.ts           In-memory entity index and consistency checks
 │   ├── management.ts      Management Channel JSON persistence
@@ -39,8 +47,9 @@ docker/                    Container build and Compose deployment
 
 The application is intentionally a small single-process service, not a
 framework with separate repositories and controllers. Start in `main.ts` for
-runtime behavior, `bot.ts` for Telegram interactions, a service for business
-rules, and `telegram/` for channel I/O.
+runtime behavior, `bot.ts` for bot setup and command registration, `handlers/`
+for feature-specific Telegram workflows, a service for business rules, and
+`telegram/` for channel I/O.
 
 ## Runtime architecture
 
@@ -79,16 +88,20 @@ could conflict while processing updates or writing channel records.
 ## Startup and shutdown
 
 `main.ts` validates configuration, starts the health listener, and retries
-required startup operations: Bot API and owner-session channel checks, index
-recovery, and webhook registration. Retries use exponential backoff capped at
-one minute. The webhook returns `503` until startup succeeds so Telegram can
-retry updates rather than processing them against an uninitialized index.
+required startup operations: Bot API token validation, Bot API and owner-session
+channel checks, index recovery, and webhook registration. Retries use
+exponential backoff capped at one minute. The webhook returns `503` until
+startup succeeds so Telegram can retry updates rather than processing them
+against an uninitialized index.
 The retry loop is cancellable so shutdown signals can stop a process waiting
 for dependencies.
 
 After startup succeeds, the app starts the periodic consistency check and
-accepts updates through the webhook. Webhook requests must include Telegram's
-secret-token header. The configured webhook is deliberately left in place at
+accepts updates through the webhook. Before a consistency-triggered rebuild,
+the app stops accepting new webhook updates, drains active updates, then
+rebuilds the index; a failed rebuild keeps updates paused until a later check
+succeeds. Webhook requests must include Telegram's secret-token header. The
+configured webhook is deliberately left in place at
 shutdown so hosts that support waking on inbound requests can be reached by
 Telegram; the host and Telegram retry behavior can delay delivery. Temporary
 interaction state remains process-local and is cleared by a restart.

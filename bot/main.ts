@@ -41,9 +41,6 @@ async function main() {
     import('./telegram/channel-access.js'),
   ]);
 
-  await validateBotApiToken(bot.api);
-  logger.info('✅ Telegram Bot API token validated');
-
   let shutdownPromise: Promise<void> | undefined;
   let stopConsistencyChecks = () => {};
   const startupAbort = new AbortController();
@@ -99,6 +96,9 @@ async function main() {
 
   const dependenciesReady = await retryUntilReady(
     async () => {
+      await validateBotApiToken(bot.api);
+      logger.info('✅ Telegram Bot API token validated');
+
       const managementOk = await checkManagementChannel();
       const storageOk = await checkStorageChannel();
       if (!managementOk || !storageOk) {
@@ -115,7 +115,7 @@ async function main() {
       return true;
     },
     startupAbort.signal,
-    'Required Telegram access or index recovery',
+    'Telegram Bot API validation, channel access, or index recovery',
   );
   if (!dependenciesReady) return;
 
