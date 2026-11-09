@@ -213,9 +213,10 @@ handling policy before deployment and tell users that assistant questions and
 permitted context are sent to that provider.
 
 The bot must be a channel administrator with permission to post in both
-channels. Startup verifies the bot's member status and posting permission
-before marking channel access ready. `TELEGRAM_USER_SESSION` is required to
-run the bot; it can remain blank only while generating the initial session.
+channels, or be the channel creator. Startup verifies the bot's member status
+and posting permission before marking channel access ready.
+`TELEGRAM_USER_SESSION` is required to run the bot; it can remain blank only
+while generating the initial session.
 The Telegram account in that session must match `OWNER_ID`, belong to both
 channels, and be able to read their history. Archiving a channel only changes
 its folder in the owner's Telegram account; it does not prevent access. The
@@ -265,9 +266,9 @@ chat with the bot.
 ### Requirements
 
 - Docker Engine and either the Compose plugin (`docker compose`) or the
-  standalone Compose command (`docker-compose`). This machine reports
-  `Docker Compose version v2.32.4` for `docker-compose --version`, so use the
-  hyphenated `docker-compose` command shown below.
+  standalone Compose command (`docker-compose`). The examples below use
+  `docker-compose`; if your system only has the Compose plugin, use
+  `docker compose` instead.
 - A configured `.env` file at the repository root. It must contain valid
   Telegram credentials and channel IDs, `TELEGRAM_USER_SESSION`, and
   `WEBHOOK_URL` and `WEBHOOK_SECRET`.
@@ -554,11 +555,10 @@ docker stats ministore
   ```
 
   If `docker-compose --version` prints a version, use the hyphenated
-  `docker-compose` form in place of `docker compose` (for example,
-  `docker-compose -f docker/docker-compose.yml up -d --build`). This project
-  documents the hyphenated form because that is the working command on this
-  machine; Compose v2.32.4 was reported. The rest of the options and project
-  commands stay the same. If neither command works,
+  `docker-compose` form (for example,
+  `docker-compose -f docker/docker-compose.yml up -d --build`). If the
+  `docker compose version` command works instead, use `docker compose` with
+  the same options. If neither command works,
   install the current Docker Compose v2 plugin for your operating system or
   install/update Docker Desktop, then open a new terminal and confirm
   `docker compose version` succeeds. Installation steps vary by Linux
@@ -575,10 +575,11 @@ Unauthorized`, Telegram rejected `BOT_TOKEN`: replace it with the current
   token from BotFather in the local `.env` or hosting environment, then restart.
   This happens before channel permissions are checked; changing channel access
   will not fix an invalid token. Other Bot API permission errors mean check the
-  channel ID and add the bot as an administrator with permission to post. The
-  owner session warning means check the full channel ID and confirm the account in
-  `TELEGRAM_USER_SESSION` matches `OWNER_ID`, is still a member, and can read
-  history. If instead logs say index recovery failed, inspect that error for
+  channel ID and add the bot as an administrator with permission to post, or
+  make it the channel creator. The owner session warning means check the full
+  channel ID and confirm the account in `TELEGRAM_USER_SESSION` matches
+  `OWNER_ID`, is still a member, and can read history. If instead logs say
+  index recovery failed, inspect that error for
   malformed or inaccessible Management Channel history. Startup retries
   automatically after temporary access or network failures are restored.
   Invalid/revoked credentials or an incorrect channel ID require configuration

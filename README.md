@@ -40,8 +40,8 @@ settings (`AI_BASE_URL`, `API_KEY`, and `AI_MODEL`) first. The webhook URL
 must end in `/telegram/webhook`; see the
 [operations guide](./docs/operations.md#configuration-and-secrets).
 MiniStore commands, files, and assistant conversations are restricted to
-private chats with the bot. Add the bot as an administrator in both channels
-and grant it permission to post.
+private chats with the bot. Add the bot as an administrator with permission to
+post in both channels, or make it the channel creator.
 
 ```bash
 cp .env.example .env
@@ -120,9 +120,8 @@ To also delete the MiniStore Docker image, run
 will recreate it.
 For status, restart, port, troubleshooting, and deployment-security commands,
 see the [Docker operations guide](./docs/operations.md#run-with-docker).
-This machine's Compose command is `docker-compose` (version v2.32.4); use
-that hyphenated form for the commands above. On systems with the Compose
-plugin, `docker compose` is the equivalent form. See the
+The examples use the standalone `docker-compose` command; if your system uses
+the Docker Compose plugin, use `docker compose` instead. See the
 [Docker troubleshooting guide](./docs/operations.md#troubleshooting).
 
 ## Common bot commands
@@ -136,7 +135,9 @@ plugin, `docker compose` is the equivalent form. See the
 | `/admin`              | Open permitted admin tools                                  |
 | `/users`, `/requests` | Manage users and access requests (authorized admins)        |
 | `/status`             | View your account role and status                           |
-| `/cancel`             | Cancel a pending interaction or upload session              |
+| `/ask`                | Ask the MiniStore assistant                                 |
+| `/usage`              | View your assistant request usage                           |
+| `/cancel`             | Cancel a prompt, upload session, or assistant conversation  |
 | `/help`               | Show basic commands                                         |
 
 ## Project layout
@@ -144,8 +145,13 @@ plugin, `docker compose` is the equivalent form. See the
 ```text
 bot/
 ├── bot.ts              Bot setup and handler wiring
-├── handlers/           Assistant, upload, and interaction state modules
-├── services/           users, resources, folders, permissions
+├── handlers/
+│   ├── callbacks/       Store routing and admin callbacks
+│   ├── screens/         Shared screen helpers and admin renderers
+│   └── assistant-ui.ts  Assistant reply and conversation UI
+├── services/
+│   ├── assistant.ts    Assistant orchestration and public API
+│   └── assistant/      Provider, formatting, identity, and resource modules
 ├── telegram/           Telegram APIs, channels, and in-memory index
 ├── webhook.ts          Authenticated Telegram webhook endpoint
 ├── health.ts           Operational health/status endpoints

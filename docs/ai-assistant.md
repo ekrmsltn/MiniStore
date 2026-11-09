@@ -222,10 +222,13 @@ for configuration, deployment, and secret-management instructions.
 
 ## Implementation and maintenance
 
-The main implementation is in `bot/services/assistant.ts`; Telegram
-interaction, request flow, and validated resource download buttons are in
-`bot/bot.ts`. The maintained product reference and role-gated knowledge are
-in `bot/services/assistant-knowledge.ts`.
+Request orchestration and the public API are in
+`bot/services/assistant.ts`. Focused assistant modules under
+`bot/services/assistant/` handle provider prompts and parsing, identity masking
+and restoration, Telegram-safe formatting, shared context types, and resource
+context ranking. Telegram interaction and validated resource download buttons
+are in `bot/handlers/assistant-ui.ts`. The maintained product reference and
+role-gated knowledge are in `bot/services/assistant-knowledge.ts`.
 
 When changing assistant behavior:
 

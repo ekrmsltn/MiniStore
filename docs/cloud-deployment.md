@@ -9,7 +9,8 @@ between hosting providers; use the equivalent fields on your platform.
 Complete the initial setup in the [operations guide](./operations.md):
 
 - Create the Telegram bot and private Management and Storage Channels. Add the
-  bot as an administrator in both channels with permission to post.
+  bot as an administrator with permission to post in both channels, or make
+  it the channel creator.
 - Generate and configure `TELEGRAM_USER_SESSION` for the owner MTProto
   account.
 - Configure a working AI provider.

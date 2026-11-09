@@ -24,12 +24,16 @@ bot/
 │   ├── notifications.ts   Access-decision notifications
 │   ├── permissions.ts    Permission definitions and checks
 │   ├── resources.ts       Resource, version, and download lifecycle
+│   ├── assistant.ts      Assistant request orchestration and public API
+│   ├── assistant/        Assistant formatting, identity, provider, and resource context
 │   └── users.ts           Access requests, roles, permissions, favorites
 ├── handlers/
 │   ├── assistant-ui.ts    Assistant reply formatting and conversation UI
-│   ├── callbacks.ts       Store and admin callback actions
+│   ├── callbacks.ts       Callback registration entry point
+│   ├── callbacks/         Store routing and admin decision callbacks
 │   ├── commands.ts        User and admin command registration
-│   ├── screens.ts         Browse, resource, and admin screen rendering
+│   ├── screens.ts         Store screens and compatibility exports
+│   ├── screens/           Shared screen helpers and admin renderers
 │   ├── state.ts           Process-local interaction state and action types
 │   ├── text-actions.ts    Follow-up text interactions
 │   └── uploads.ts         Upload prompts, callbacks, and media handling
@@ -72,8 +76,9 @@ Telegram update
 
 - grammY receives Telegram updates through the authenticated webhook in
   `webhook.ts`; the configured public HTTPS URL ends in `/telegram/webhook`.
-- Handlers in `bot.ts` parse commands and callbacks, check the current index
-  state and permissions, invoke services, and respond in chat.
+- `bot.ts` wires the command, callback, upload, and text-action handlers.
+  Feature handlers check the current index state and permissions, invoke
+  services, and respond in chat.
 - Services validate inputs and business constraints before changing entities.
 - The in-memory index provides lookups and serializes changes by entity ID.
 - The Management Channel is the durable metadata store. The Storage Channel
@@ -227,12 +232,17 @@ operational details, see the [AI assistant guide](./ai-assistant.md). The
 engineering rules below are the implementation contract for changes to this
 feature.
 
-`services/assistant.ts` implements a read-only assistant over configurable
+`services/assistant.ts` orchestrates a read-only assistant over configurable
 `AI_BASE_URL`, `API_KEY`, `AI_MODEL`, and `AI_API_FORMAT` settings. Keep all
 provider credentials in the environment. The API key belongs only in the
 provider authentication header; do not include it in prompts, context,
 exceptions, or logs. Keep provider errors generic and never log provider
 response bodies.
+The `services/assistant/` modules isolate Telegram-safe formatting, identity
+masking and restoration, provider prompts and response parsing, shared context
+types, and resource-context ranking. Keep authorization, conversation state,
+and request orchestration in the service; extract additional modules when
+those responsibilities grow without creating cross-module state dependencies.
 The base URL, key, and model are required for application startup; replace all
 example values before running the bot.
 
