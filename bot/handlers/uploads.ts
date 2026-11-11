@@ -15,6 +15,9 @@ import {
 } from '../telegram/storage';
 import { index } from '../telegram/index';
 import { hasPermission } from '../services/permissions';
+import { canAccessFolder, canAccessResource } from '../services/visibility';
+import type { Visibility } from '../models';
+import { getAllUsers } from '../services/users';
 
 export type UploadAction =
   { type: 'new'; folderId: string | null } | { type: 'version'; resourceId: string };
@@ -22,6 +25,12 @@ export type UploadAction =
 // Keep upload destination and version actions scoped to each user.
 export const uploadFolderState = new Map<number, string | null>();
 export const uploadVersionState = new Map<number, string>();
+export const uploadVisibilityState = new Map<number, Visibility>();
+export const uploadSetupState = new Map<
+  number,
+  { folderId: string | null; userIds: Set<number> }
+>();
+const UPLOAD_CUSTOM_PAGE_SIZE = 8;
 
 export async function promptForUpload(
   ctx: Context,
@@ -30,10 +39,12 @@ export async function promptForUpload(
 ): Promise<void> {
   uploadFolderState.delete(telegramId);
   uploadVersionState.delete(telegramId);
+  uploadVisibilityState.delete(telegramId);
+  uploadSetupState.delete(telegramId);
 
   if (action.type === 'version') {
     const resource = index.getResource(action.resourceId);
-    if (!resource || resource.isDeleted) {
+    if (!resource || resource.isDeleted || !canAccessResource(telegramId, resource)) {
       await ctx.reply('That resource is no longer available. Return to MiniStore and try again.', {
         reply_markup: new InlineKeyboard().text('← Store', 'lib:home'),
       });
@@ -47,25 +58,100 @@ export async function promptForUpload(
     return;
   }
 
-  if (action.folderId) {
-    const folder = index.getFolder(action.folderId);
-    if (!folder || folder.isDeleted) {
-      await ctx.reply('That folder is no longer available. Return to MiniStore and try again.', {
-        reply_markup: new InlineKeyboard().text('← Store', 'lib:home'),
-      });
-      return;
-    }
+  if (action.folderId && !canAccessFolder(telegramId, action.folderId)) {
+    await ctx.reply('That folder is no longer available. Return to MiniStore and try again.', {
+      reply_markup: new InlineKeyboard().text('← Store', 'lib:home'),
+    });
+    return;
   }
 
-  uploadFolderState.set(telegramId, action.folderId);
-  const folderName = action.folderId ? index.getFolder(action.folderId)?.name || 'Unknown' : 'Root';
+  uploadSetupState.set(telegramId, { folderId: action.folderId, userIds: new Set() });
   await ctx.reply(
-    `📤 Upload files to ${folderName}. Send one or more Telegram-supported files or media, then tap Done.`,
+    'Choose who can access the new file. A folder’s rules still apply and may further restrict access.',
+    {
+      reply_markup: new InlineKeyboard()
+        .text('🌐 Public', 'upload:visibility:public')
+        .text('🔒 Private', 'upload:visibility:private')
+        .row()
+        .text('👥 Customize', 'upload:visibility:custom'),
+    },
+  );
+}
+
+function getUploadCustomAccounts() {
+  return getAllUsers()
+    .filter((user) => user.status === 'active' && (user.role === 'user' || user.role === 'admin'))
+    .sort((left, right) =>
+      (left.firstName || left.username || '').localeCompare(
+        right.firstName || right.username || '',
+      ),
+    );
+}
+
+async function showUploadCustomAccounts(
+  ctx: Context,
+  telegramId: number,
+  page: number,
+): Promise<void> {
+  const setup = uploadSetupState.get(telegramId);
+  if (!setup) {
+    await ctx.reply('Upload setup expired. Start again with /upload.');
+    return;
+  }
+  const accounts = getUploadCustomAccounts();
+  const pageCount = Math.max(1, Math.ceil(accounts.length / UPLOAD_CUSTOM_PAGE_SIZE));
+  const safePage = Math.min(Math.max(0, page), pageCount - 1);
+  const keyboard = new InlineKeyboard();
+  for (const account of accounts.slice(
+    safePage * UPLOAD_CUSTOM_PAGE_SIZE,
+    (safePage + 1) * UPLOAD_CUSTOM_PAGE_SIZE,
+  )) {
+    const name =
+      [account.firstName, account.lastName].filter(Boolean).join(' ') ||
+      account.username ||
+      String(account.telegramId);
+    keyboard
+      .text(
+        `${setup.userIds.has(account.telegramId) ? '✅' : '⬜'} ${name}`.slice(0, 55),
+        `upload:custom:toggle:${safePage}:${account.telegramId}`,
+      )
+      .row();
+  }
+  if (safePage > 0) keyboard.text('‹ Previous', `upload:custom:page:${safePage - 1}`);
+  if (safePage + 1 < pageCount) keyboard.text('Next ›', `upload:custom:page:${safePage + 1}`);
+  if (safePage > 0 || safePage + 1 < pageCount) keyboard.row();
+  keyboard.text('Save selection', 'upload:custom:done').text('Cancel', 'upload:cancel');
+  await ctx.editMessageText(
+    `Select active approved accounts for the new file. The owner always has access.${pageCount > 1 ? ` · page ${safePage + 1}/${pageCount}` : ''}\nSelected: ${setup.userIds.size}`,
+    { reply_markup: keyboard },
+  );
+}
+
+async function startNewUpload(
+  ctx: Context,
+  telegramId: number,
+  visibility: Visibility,
+): Promise<void> {
+  const setup = uploadSetupState.get(telegramId);
+  if (!setup) {
+    await ctx.reply('Upload setup expired. Start again with /upload.');
+    return;
+  }
+  if (setup.folderId && !canAccessFolder(telegramId, setup.folderId)) {
+    uploadSetupState.delete(telegramId);
+    await ctx.reply('You can no longer access the selected folder. Start again from the store.');
+    return;
+  }
+  uploadFolderState.set(telegramId, setup.folderId);
+  uploadVisibilityState.set(telegramId, visibility);
+  uploadSetupState.delete(telegramId);
+  const folderName = setup.folderId ? index.getFolder(setup.folderId)?.name || 'Unknown' : 'Root';
+  await ctx.editMessageText(
+    `📤 Upload files to ${folderName} (${visibility.mode}). Send one or more Telegram-supported files or media, then tap Done.`,
     {
       reply_markup: new InlineKeyboard()
         .text('✅ Done', 'upload:finish')
-        .text('Cancel', 'upload:cancel')
-        .row(),
+        .text('Cancel', 'upload:cancel'),
     },
   );
 }
@@ -78,11 +164,57 @@ export function registerUploadHandlers(bot: Bot<Context>): void {
     const action = ctx.match[1];
     uploadFolderState.delete(userId);
     uploadVersionState.delete(userId);
+    uploadVisibilityState.delete(userId);
+    uploadSetupState.delete(userId);
     await ctx.answerCallbackQuery();
     await ctx.editMessageText(
       action === 'finish' ? '✅ Upload session finished.' : 'Upload session cancelled.',
       { reply_markup: new InlineKeyboard().text('Open store', 'lib:home') },
     );
+  });
+
+  bot.callbackQuery(/^upload:visibility:(public|private|custom)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const userId = ctx.from.id;
+    const setup = uploadSetupState.get(userId);
+    if (!setup) return ctx.reply('Upload setup expired. Start again with /upload.');
+    const mode = ctx.match[1];
+    if (mode === 'custom') return showUploadCustomAccounts(ctx, userId, 0);
+    return startNewUpload(
+      ctx,
+      userId,
+      mode === 'public' ? { mode: 'public' } : { mode: 'private' },
+    );
+  });
+
+  bot.callbackQuery(/^upload:custom:(page|toggle|done)(?::(\d+))?(?::(\d+))?$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const userId = ctx.from.id;
+    const [, action, first, second] = ctx.match;
+    const setup = uploadSetupState.get(userId);
+    if (!setup) return ctx.reply('Upload setup expired. Start again with /upload.');
+    if (action === 'page') return showUploadCustomAccounts(ctx, userId, Number(first));
+    if (action === 'toggle') {
+      const page = Number(first);
+      const selectedId = Number(second);
+      const account = index.getUserByTelegramId(selectedId);
+      if (
+        !Number.isSafeInteger(page) ||
+        !Number.isSafeInteger(selectedId) ||
+        !account ||
+        account.status !== 'active' ||
+        (account.role !== 'user' && account.role !== 'admin')
+      ) {
+        return ctx.reply('Only active approved accounts can be selected.');
+      }
+      if (setup.userIds.has(selectedId)) setup.userIds.delete(selectedId);
+      else if (setup.userIds.size < 200) setup.userIds.add(selectedId);
+      else return ctx.reply('A customized audience can contain at most 200 accounts.');
+      return showUploadCustomAccounts(ctx, userId, page);
+    }
+    if (action === 'done') {
+      return startNewUpload(ctx, userId, { mode: 'custom', userIds: [...setup.userIds] });
+    }
   });
 
   // ==================== FILE UPLOAD HANDLER ====================
@@ -203,6 +335,7 @@ export function registerUploadHandlers(bot: Bot<Context>): void {
     let uploadedFile: Awaited<ReturnType<typeof uploadTelegramMedia>> | undefined;
     let uploadCommitted = false;
     let versionResourceId: string | undefined;
+    let uploadVisibility: Visibility | undefined;
     try {
       const file = getIncomingTelegramFile(ctx.msg);
       if (!file) {
@@ -210,6 +343,15 @@ export function registerUploadHandlers(bot: Bot<Context>): void {
         return;
       }
       const { fileId, fileName, fileSize, fileType } = file;
+      versionResourceId = uploadVersionState.get(user.id);
+      const hasUploadSession = uploadFolderState.has(user.id);
+      uploadVisibility = uploadVisibilityState.get(user.id);
+      if (!versionResourceId && (!hasUploadSession || !uploadVisibility)) {
+        await ctx.reply(
+          'Start an upload with /upload or the Upload button and choose its visibility first.',
+        );
+        return;
+      }
 
       if (fileSize > 50 * 1024 * 1024) {
         await ctx.reply('❌ File size exceeds the 50 MB limit.');
@@ -222,10 +364,9 @@ export function registerUploadHandlers(bot: Bot<Context>): void {
         return;
       }
 
-      versionResourceId = uploadVersionState.get(user.id);
       if (versionResourceId) {
         const resource = index.getResource(versionResourceId);
-        if (!resource || resource.isDeleted) {
+        if (!resource || resource.isDeleted || !canAccessResource(user.id, resource)) {
           uploadVersionState.delete(user.id);
           await ctx.reply(
             'That resource is no longer available. Return to MiniStore and try again.',
@@ -234,11 +375,12 @@ export function registerUploadHandlers(bot: Bot<Context>): void {
         }
       }
 
-      const hasUploadSession = uploadFolderState.has(user.id);
       const selectedFolderId = uploadFolderState.get(user.id) || null;
       if (
         selectedFolderId &&
-        (!index.getFolder(selectedFolderId) || index.getFolder(selectedFolderId)?.isDeleted)
+        (!index.getFolder(selectedFolderId) ||
+          index.getFolder(selectedFolderId)?.isDeleted ||
+          !canAccessFolder(user.id, selectedFolderId))
       ) {
         uploadFolderState.delete(user.id);
         await ctx.reply(
@@ -291,6 +433,8 @@ export function registerUploadHandlers(bot: Bot<Context>): void {
         fileInfo.messageId,
         fileInfo.fileId,
         user.id,
+        fileInfo.fileName || fileName,
+        uploadVisibility,
       );
       uploadCommitted = true;
 

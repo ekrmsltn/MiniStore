@@ -5,6 +5,7 @@ import { getAllResources, getDeletedResources } from '../../services/resources';
 import { getDeletedFolders } from '../../services/folders';
 import { getAssistantUsageOverview } from '../../services/assistant';
 import { AVAILABLE_PERMISSIONS, hasPermission } from '../../services/permissions';
+import { canAccessFolder, canAccessResource } from '../../services/visibility';
 import { index } from '../../telegram/index';
 import { isAdminUser, renderScreen } from './shared';
 
@@ -13,7 +14,7 @@ const config = loadConfig();
 export async function showAdminResources(ctx: Context, page = 0): Promise<void> {
   const telegramId = ctx.from?.id;
   if (!telegramId || !isAdminUser(telegramId)) return;
-  const resources = getAllResources();
+  const resources = getAllResources().filter((resource) => canAccessResource(telegramId, resource));
   const pageSize = 8;
   const pageCount = Math.max(1, Math.ceil(resources.length / pageSize));
   const safePage = Math.min(page, pageCount - 1);
@@ -22,7 +23,7 @@ export async function showAdminResources(ctx: Context, page = 0): Promise<void> 
     keyboard
       .text(
         `📄 ${resource.title}`.slice(0, 60),
-        `lib:resource:${resource.id.slice('resource:'.length)}`,
+        `lib:resource:${resource.id.slice('resource:'.length)}|admin:resources:${safePage}`,
       )
       .row();
   }
@@ -46,7 +47,9 @@ export async function showAdminResources(ctx: Context, page = 0): Promise<void> 
 export async function showAdminFolders(ctx: Context, page = 0): Promise<void> {
   const telegramId = ctx.from?.id;
   if (!telegramId || !hasPermission(telegramId, 'manage_folders')) return;
-  const folders = index.getFolders().filter((folder) => !folder.isDeleted);
+  const folders = index
+    .getFolders()
+    .filter((folder) => !folder.isDeleted && canAccessFolder(telegramId, folder.id));
   const pageSize = 8;
   const pageCount = Math.max(1, Math.ceil(folders.length / pageSize));
   const safePage = Math.min(page, pageCount - 1);
@@ -72,7 +75,13 @@ export async function showAdminFolders(ctx: Context, page = 0): Promise<void> {
 export async function showAdminFolder(ctx: Context, folderId: string): Promise<void> {
   const telegramId = ctx.from?.id;
   const folder = index.getFolder(folderId);
-  if (!telegramId || !hasPermission(telegramId, 'manage_folders') || !folder || folder.isDeleted) {
+  if (
+    !telegramId ||
+    !hasPermission(telegramId, 'manage_folders') ||
+    !folder ||
+    folder.isDeleted ||
+    !canAccessFolder(telegramId, folderId)
+  ) {
     await renderScreen(
       ctx,
       'This folder is unavailable.',
@@ -80,10 +89,17 @@ export async function showAdminFolder(ctx: Context, folderId: string): Promise<v
     );
     return;
   }
-  const children = index.getChildFolders(folderId);
+  const children = index
+    .getChildFolders(folderId)
+    .filter((child) => canAccessFolder(telegramId, child.id));
   const resources = index
     .getResources()
-    .filter((resource) => resource.folderId === folderId && !resource.isDeleted);
+    .filter(
+      (resource) =>
+        resource.folderId === folderId &&
+        !resource.isDeleted &&
+        canAccessResource(telegramId, resource),
+    );
   const keyboard = new InlineKeyboard()
     .text('📂 Browse contents', `lib:browse:${folder.id.slice('folder:'.length)}`)
     .row()
@@ -94,7 +110,16 @@ export async function showAdminFolder(ctx: Context, folderId: string): Promise<v
   if (hasPermission(telegramId, 'delete_resources')) {
     keyboard.text('🗑️ Delete', `lib:folder-delete:${folder.id.slice('folder:'.length)}`);
   }
+  if (folder.parentId && canAccessFolder(telegramId, folder.parentId)) {
+    keyboard.row().text('← Parent folder', `lib:folder:${folder.parentId.slice('folder:'.length)}`);
+  }
   keyboard.row().text('← Folders', 'admin:folders').text('Admin menu', 'admin:back');
+  keyboard
+    .row()
+    .text(
+      `🔐 Visibility: ${folder.visibility?.mode ?? 'inherit'}`,
+      `visibility:open:folder:${folder.id.slice('folder:'.length)}`,
+    );
   await renderScreen(
     ctx,
     `📁 ${folder.name}\n${children.length} subfolder${children.length === 1 ? '' : 's'} · ${resources.length} file${resources.length === 1 ? '' : 's'}`,
@@ -106,9 +131,13 @@ export async function showRecycleBin(ctx: Context, page = 0): Promise<void> {
   const telegramId = ctx.from?.id;
   if (!telegramId || !hasPermission(telegramId, 'delete_resources')) return;
   const resources = getDeletedResources().filter(
-    (resource) => !resource.folderId || !index.getFolder(resource.folderId)?.isDeleted,
+    (resource) =>
+      (!resource.folderId || !index.getFolder(resource.folderId)?.isDeleted) &&
+      canAccessResource(telegramId, resource),
   );
-  const folders = hasPermission(telegramId, 'manage_folders') ? getDeletedFolders() : [];
+  const folders = hasPermission(telegramId, 'manage_folders')
+    ? getDeletedFolders().filter((folder) => canAccessFolder(telegramId, folder.id))
+    : [];
   const entries = [
     ...folders.map((folder) => ({ kind: 'folder' as const, id: folder.id, name: folder.name })),
     ...resources.map((resource) => ({

@@ -178,10 +178,12 @@ capped at eight. Matching metadata and resource IDs are sent to the configured
 AI provider, but IDs are never shown to users and metadata is not dumped in
 answers. The assistant may mention a useful folder path or relevant search
 term when it helps locate a resource; tags are not listed by default.
-Assistant-selected IDs are checked against the current snapshot before the bot
-offers an in-chat Download button. Keep this knowledge reviewed and updated
-with behavior or documentation changes; the model must acknowledge missing
-knowledge instead of guessing.
+Resource matching and aggregate counts are scoped to the caller's effective
+visibility; private or customized resources the caller cannot access are not
+sent to the provider. Assistant-selected IDs are checked against current access
+before the bot offers an in-chat Download button. Keep this knowledge reviewed
+and updated with behavior or documentation changes; the model must acknowledge
+missing knowledge instead of guessing.
 The assistant retains up to five recent question/answer pairs in process
 memory for 30 minutes after the last question. The turns are sent to the
 provider with each follow-up and are not written to disk, logs, or Telegram

@@ -24,6 +24,7 @@ bot/
 │   ├── notifications.ts   Access-decision notifications
 │   ├── permissions.ts    Permission definitions and checks
 │   ├── resources.ts       Resource, version, and download lifecycle
+│   ├── visibility.ts      Resource and inherited folder access policy
 │   ├── assistant.ts      Assistant request orchestration and public API
 │   ├── assistant/        Assistant formatting, identity, provider, and resource context
 │   └── users.ts           Access requests, roles, permissions, favorites
@@ -125,8 +126,8 @@ rebuilt later; it is a cache, not the source of truth.
 | Entity             | Purpose                                                                 |
 | ------------------ | ----------------------------------------------------------------------- |
 | `user`             | Telegram identity, role, status, permissions, and favorites             |
-| `folder`           | Folder name, parent, creator, and soft-delete state                     |
-| `resource`         | File metadata, Storage Channel references, version number, and counters |
+| `folder`           | Folder name, parent, visibility, creator, and soft-delete state       |
+| `resource`         | File metadata, visibility, Storage Channel references, version, and counters |
 | `resource_version` | Historical file metadata and Storage Channel references                 |
 | `audit`            | Actor, action, target, metadata, and timestamp                          |
 | `session`          | Legacy record accepted for reading historical channel messages          |
@@ -194,6 +195,16 @@ Keep authorization checks in handlers for user feedback and in service
 operations where they are needed to protect business invariants. Never rely
 only on whether a button is visible: Telegram callbacks can be replayed or
 crafted independently of the current menu.
+
+Resource visibility is enforced by `services/visibility.ts`: legacy resources
+default to Public, legacy folders inherit, and each child audience is
+intersected with every ancestor. Private includes only the owner and active
+admins; Customize includes only the owner and selected active, approved
+accounts (at most 200 selected IDs). Admin status does not bypass Customize.
+Check the current caller's effective access before displaying, mutating, or
+returning a resource, including resources nested in a folder operation.
+Assistant resource metadata and aggregates must be built only from the
+caller's accessible catalog and revalidated before delivery.
 
 Services validate persistent data constraints, such as title lengths,
 folder depth, resource limits, duplicate file IDs, unique directory names, and

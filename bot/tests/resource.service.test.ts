@@ -1,5 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createMockResource, resetEnv, setupEnv } from './helpers';
+import {
+  createMockFolder,
+  createMockResource,
+  createMockUser,
+  resetEnv,
+  setupEnv,
+} from './helpers';
 
 describe('Resource service', () => {
   let index: {
@@ -9,6 +15,8 @@ describe('Resource service', () => {
     getResources: ReturnType<typeof vi.fn>;
     getResource: ReturnType<typeof vi.fn>;
     getResourceVersions: ReturnType<typeof vi.fn>;
+    getUsers: ReturnType<typeof vi.fn>;
+    getUserByTelegramId: ReturnType<typeof vi.fn>;
     saveEntity: ReturnType<typeof vi.fn>;
     updateEntity: ReturnType<typeof vi.fn>;
     deleteEntity: ReturnType<typeof vi.fn>;
@@ -17,13 +25,19 @@ describe('Resource service', () => {
     deleteFile: ReturnType<typeof vi.fn>;
     hasStoredFile: ReturnType<typeof vi.fn>;
   };
+  let users: ReturnType<typeof createMockUser>[];
 
   beforeEach(() => {
     setupEnv();
     vi.resetModules();
+    users = [createMockUser(), createMockUser({ telegramId: 54321, id: 'user:54321' })];
     index = {
-      getFolder: vi.fn().mockReturnValue(undefined),
+      getFolder: vi.fn((id: string) =>
+        id === 'folder:abc123' ? createMockFolder({ id }) : undefined,
+      ),
       getFolders: vi.fn().mockReturnValue([]),
+      getUsers: vi.fn(() => users),
+      getUserByTelegramId: vi.fn((id: number) => users.find((user) => user.telegramId === id)),
       getByType: vi.fn().mockReturnValue([]),
       getResources: vi.fn().mockReturnValue([]),
       getResource: vi.fn(),
@@ -61,6 +75,19 @@ describe('Resource service', () => {
       ),
     ).rejects.toThrow('Active folder folder:missing not found');
     expect(index.saveEntity).not.toHaveBeenCalled();
+  });
+
+  it('prevents metadata edits to resources outside the actor visibility audience', async () => {
+    const resource = createMockResource({
+      visibility: { mode: 'custom', userIds: [54321] },
+    });
+    index.getResource.mockReturnValue(resource);
+    const { updateResource } = await import('../services/resources');
+
+    await expect(updateResource(resource.id, { title: 'Changed' }, 12345)).rejects.toThrow(
+      'You cannot edit a file you cannot access',
+    );
+    expect(index.updateEntity).not.toHaveBeenCalled();
   });
 
   it('prevents concurrent creation of duplicate resources for the same Telegram file', async () => {

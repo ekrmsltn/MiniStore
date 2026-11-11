@@ -1,5 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { setupEnv, resetEnv, createMockUser } from './helpers';
+import {
+  setupEnv,
+  resetEnv,
+  createMockFolder,
+  createMockResource,
+  createMockUser,
+} from './helpers';
 
 const mtprotoMocks = vi.hoisted(() => ({
   iterateChannelHistory: vi.fn(),
@@ -24,9 +30,36 @@ describe('Management channel persistence', () => {
       yield { id: 8, message: 'New access request from user' };
       yield { id: 9, message: JSON.stringify(user) };
     });
-
     const { getAllEntityRecords } = await import('../telegram/management');
     await expect(getAllEntityRecords()).resolves.toEqual([{ entity: user, messageId: 9 }]);
+  });
+
+  it('accepts legacy resources and folders without visibility metadata', async () => {
+    const resource = createMockResource({ folderId: null });
+    const folder = createMockFolder();
+    mtprotoMocks.iterateChannelHistory.mockImplementation(async function* () {
+      yield { id: 20, message: JSON.stringify(resource) };
+      yield { id: 21, message: JSON.stringify(folder) };
+    });
+
+    const { getAllEntityRecords } = await import('../telegram/management');
+    await expect(getAllEntityRecords()).resolves.toEqual([
+      { entity: resource, messageId: 20 },
+      { entity: folder, messageId: 21 },
+    ]);
+  });
+
+  it('rejects malformed visibility metadata instead of loading it', async () => {
+    const resource = createMockResource({
+      folderId: null,
+      visibility: { mode: 'custom', userIds: [12345, 12345] },
+    });
+    mtprotoMocks.iterateChannelHistory.mockImplementation(async function* () {
+      yield { id: 22, message: JSON.stringify(resource) };
+    });
+
+    const { getAllEntityRecords } = await import('../telegram/management');
+    await expect(getAllEntityRecords()).rejects.toThrow('not a valid MiniStore entity');
   });
 
   it('accepts persistent session records without storing bearer tokens', async () => {

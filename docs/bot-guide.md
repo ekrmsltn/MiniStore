@@ -105,9 +105,11 @@ Uploading requires the `upload_resources` permission.
 
 1. Send `/upload` to upload to the root folder, or open a folder and choose
    **Upload here** to use that folder as the destination.
-2. Send one or more files to the bot.
-3. Each file is stored as its own resource as soon as it succeeds.
-4. Use **Done** to finish the upload session or **Cancel** to stop accepting
+2. Choose **Public**, **Private**, or **Customize** before sending files.
+   Customize lets you select up to 200 active, approved accounts.
+3. Send one or more files to the bot.
+4. Each file is stored as its own resource as soon as it succeeds.
+5. Use **Done** to finish the upload session or **Cancel** to stop accepting
    more files.
 
 The bot accepts documents, photos, videos, audio, animations, voice notes,
@@ -130,7 +132,7 @@ not remove saved files or metadata.
 An administrator with `upload_resources` can start a version upload from a
 resource's details screen. Version uploads accept one file per action. The
 previous version remains available for download until the resource is
-permanently deleted.
+permanently deleted. All versions use the resource's current visibility.
 
 ### If an upload reports an error
 
@@ -160,6 +162,26 @@ category registry.
 Administrators with `manage_folders` can create, rename, and move folders.
 Folder names may contain up to 100 characters, and nesting is limited to
 10 levels. A folder cannot be moved into itself or one of its descendants.
+
+## Resource access
+
+Files and folders can be **Public**, **Private**, or **Customize**:
+
+- **Public** is available to every active, approved MiniStore account.
+- **Private** is available to the owner and active administrators.
+- **Customize** is available to the owner and the selected active, approved
+  accounts. Administrators do not bypass a customized audience.
+
+The owner always has access. A child folder or file can narrow access but
+cannot widen it beyond any parent folder's rules. For example, a Public file
+inside a Private folder is still limited to that folder's audience. New folders
+inherit their parent's access by default; new files require a visibility choice
+during upload. Existing records without visibility settings remain Public
+(folders inherit). An administrator with the relevant management permission
+can change visibility only while they can access the item. Use an item's
+**Visibility** button to edit it; folder rules can also be reset to inherit.
+Changes apply immediately to existing descendants and are recalculated as
+users browse, download, manage, and ask the assistant; no bot restart is needed.
 
 Deleted folders are not available for normal browsing. Folder deletion and
 restoration also require `delete_resources`. Folder names that collide with

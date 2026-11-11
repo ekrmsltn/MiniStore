@@ -85,13 +85,22 @@ usage.
 ## Resource search and delivery
 
 For a resource-related question, the bot reads the current active resource
-catalog from its index and ranks records locally using terms from the question
-against titles, tags, filenames, descriptions, categories, file types, and
-folder paths. Matching is lexical; it is not vector search. Deleted resources
-are excluded, and the catalog is refreshed for each question. At most eight
-matches are sent to the model. Broad catalog questions use the eight most
-recently updated active records; use `/search` for the store's regular search
-flow.
+catalog that the current caller is authorized to access and ranks those
+records locally using terms from the question against titles, tags, filenames,
+descriptions, categories, file types, and folder paths. Matching is lexical;
+it is not vector search. Deleted resources and resources hidden by a folder
+or resource visibility rule are excluded, including from aggregate resource
+and download counts. Active folder counts are also limited to folders the
+caller can access. The catalog is refreshed for each question. At most
+eight matches are sent to the model. Broad catalog questions use the eight
+most recently updated accessible records; use `/search` for the store's
+regular search flow.
+
+The assistant never receives resource metadata or counts for files the caller
+cannot access. A change to the caller's accessible resource or folder set
+clears that caller's prior assistant turns before the next provider request.
+Access is checked again before the assistant response is saved or returned,
+and again when a Download button is used.
 
 Resource metadata helps the assistant match the request; it should not be
 dumped as a metadata list in the answer. The assistant should name relevant

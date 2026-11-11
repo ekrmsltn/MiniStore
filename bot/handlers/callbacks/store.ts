@@ -27,6 +27,7 @@ import {
   restoreFolder,
 } from '../../services/folders';
 import { AVAILABLE_PERMISSIONS, hasPermission } from '../../services/permissions';
+import { canAccessFolder, canAccessResource, canAccessResourceId } from '../../services/visibility';
 import { index } from '../../telegram/index';
 import { textActionState } from '../state';
 import { promptForUpload } from '../uploads';
@@ -48,6 +49,7 @@ import {
   showBrowse,
   showFavorites,
   showHome,
+  showLastSearchResults,
   showPendingRequests,
   showRecycleBin,
   showResource,
@@ -97,8 +99,20 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
     if (data === 'lib:noop') return;
     if (data === 'lib:home') return showHome(ctx);
     if (data === 'lib:browse:root') return showBrowse(ctx, null);
+    if (data.startsWith('lib:b:')) {
+      const [, , target, pageText, sortText] = data.split(':');
+      return showBrowse(
+        ctx,
+        target === 'root' ? null : folderIdFromToken(target),
+        Number(pageText || 0),
+        sortText === 'r' ? 'recent' : 'name',
+      );
+    }
     if (data === 'lib:search') {
       return promptForText(ctx, { type: 'search' }, 'Send a search phrase to find files.');
+    }
+    if (data.startsWith('lib:search-results:')) {
+      return showLastSearchResults(ctx, data.slice('lib:search-results:'.length));
     }
     if (data === 'lib:favorites') return showFavorites(ctx);
     if (data === 'lib:profile') {
@@ -146,12 +160,17 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
       );
     }
     if (data.startsWith('lib:resource:')) {
-      return showResource(ctx, resourceIdFromToken(data.slice('lib:resource:'.length)));
+      const [resourceAction, back] = data.split('|', 2);
+      return showResource(
+        ctx,
+        resourceIdFromToken(resourceAction.slice('lib:resource:'.length)),
+        back,
+      );
     }
     if (data.startsWith('lib:download:')) {
       const resourceId = resourceIdFromToken(data.slice('lib:download:'.length));
       const resource = getResource(resourceId);
-      if (!resource || resource.isDeleted || !ctx.chat) {
+      if (!resource || resource.isDeleted || !canAccessResource(user.id, resource) || !ctx.chat) {
         return renderScreen(
           ctx,
           'This file is unavailable.',
@@ -170,7 +189,13 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
       const version = Number.isSafeInteger(versionNumber)
         ? getResourceVersion(resourceId, versionNumber)
         : undefined;
-      if (!resource || resource.isDeleted || !version || !ctx.chat) {
+      if (
+        !resource ||
+        resource.isDeleted ||
+        !canAccessResource(user.id, resource) ||
+        !version ||
+        !ctx.chat
+      ) {
         return ctx.reply('This file version is unavailable.', {
           reply_markup: new InlineKeyboard().text(
             '← File details',
@@ -193,6 +218,10 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
     }
     if (data.startsWith('lib:favorite:')) {
       const resourceId = resourceIdFromToken(data.slice('lib:favorite:'.length));
+      const resource = getResource(resourceId);
+      if (!resource || resource.isDeleted || !canAccessResource(user.id, resource)) {
+        return ctx.reply('This file is unavailable.');
+      }
       const isFavorite = getUserById(user.id)?.favorites.includes(resourceId) ?? false;
       if (isFavorite) await removeFavorite(user.id, resourceId);
       else await addFavorite(user.id, resourceId);
@@ -202,33 +231,42 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
       const target = data.slice('lib:upload:'.length);
       if (!hasPermission(user.id, 'upload_resources'))
         return ctx.reply('You do not have permission to upload files.');
+      const folderId = target === 'root' ? null : folderIdFromToken(target);
+      if (folderId && !canAccessFolder(user.id, folderId)) {
+        return ctx.reply('You cannot upload to a folder you cannot access.');
+      }
       return promptForUpload(ctx, user.id, {
         type: 'new',
-        folderId: target === 'root' ? null : folderIdFromToken(target),
+        folderId,
       });
     }
     if (data.startsWith('lib:version:')) {
       if (!hasPermission(user.id, 'upload_resources'))
         return ctx.reply('You do not have permission to upload versions.');
       const resourceId = resourceIdFromToken(data.slice('lib:version:'.length));
+      const resource = getResource(resourceId);
+      if (!resource || resource.isDeleted || !canAccessResource(user.id, resource)) {
+        return ctx.reply('This file is unavailable.');
+      }
       return promptForUpload(ctx, user.id, { type: 'version', resourceId });
     }
     if (data.startsWith('lib:folder-create:')) {
       if (!hasPermission(user.id, 'manage_folders'))
         return ctx.reply('You do not have permission to manage folders.');
       const target = data.slice('lib:folder-create:'.length);
-      return promptForText(
-        ctx,
-        { type: 'folder-create', parentId: target === 'root' ? null : folderIdFromToken(target) },
-        'Send the new folder name.',
-      );
+      const parentId = target === 'root' ? null : folderIdFromToken(target);
+      if (parentId && !canAccessFolder(user.id, parentId)) {
+        return ctx.reply('You cannot create a folder inside a folder you cannot access.');
+      }
+      return promptForText(ctx, { type: 'folder-create', parentId }, 'Send the new folder name.');
     }
     if (data.startsWith('lib:folder-rename:')) {
       if (!hasPermission(user.id, 'manage_folders'))
         return ctx.reply('You do not have permission to manage folders.');
       const folderId = folderIdFromToken(data.slice('lib:folder-rename:'.length));
       const folder = index.getFolder(folderId);
-      if (!folder || folder.isDeleted) return ctx.reply('That folder is no longer available.');
+      if (!folder || folder.isDeleted || !canAccessFolder(user.id, folderId))
+        return ctx.reply('That folder is no longer available.');
       return promptForText(
         ctx,
         { type: 'folder-rename', folderId },
@@ -241,14 +279,22 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
     if (data.startsWith('lib:folder-move:')) {
       const folderId = folderIdFromToken(data.slice('lib:folder-move:'.length));
       const folder = index.getFolder(folderId);
-      if (!folder || folder.isDeleted || !hasPermission(user.id, 'manage_folders')) return;
+      if (
+        !folder ||
+        folder.isDeleted ||
+        !hasPermission(user.id, 'manage_folders') ||
+        !canAccessFolder(user.id, folderId)
+      )
+        return;
       const folderToken = folder.id.slice('folder:'.length);
       const keyboard = new InlineKeyboard()
         .text('Root', `lib:folder-move-to:${folderToken}|root`)
         .row();
       for (const target of index
         .getFolders()
-        .filter((item) => !item.isDeleted && item.id !== folderId)
+        .filter(
+          (item) => !item.isDeleted && item.id !== folderId && canAccessFolder(user.id, item.id),
+        )
         .slice(0, 20)) {
         keyboard
           .text(
@@ -265,11 +311,15 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
         return ctx.reply('You do not have permission to move folders.');
       const [folderId, target] = data.slice('lib:folder-move-to:'.length).split('|');
       if (!folderId || !target) return;
-      await moveFolder(
-        folderIdFromToken(folderId),
-        target === 'root' ? null : folderIdFromToken(target),
-        user.id,
-      );
+      const sourceFolderId = folderIdFromToken(folderId);
+      const targetFolderId = target === 'root' ? null : folderIdFromToken(target);
+      if (
+        !canAccessFolder(user.id, sourceFolderId) ||
+        (targetFolderId && !canAccessFolder(user.id, targetFolderId))
+      ) {
+        return ctx.reply('You cannot move folders you cannot access.');
+      }
+      await moveFolder(sourceFolderId, targetFolderId, user.id);
       return showAdminFolder(ctx, folderIdFromToken(folderId));
     }
     if (data.startsWith('lib:folder-delete:')) {
@@ -281,7 +331,7 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
       }
       const folderId = folderIdFromToken(data.slice('lib:folder-delete:'.length));
       const folder = index.getFolder(folderId);
-      if (!folder || folder.isDeleted) return;
+      if (!folder || folder.isDeleted || !canAccessFolder(user.id, folderId)) return;
       const keyboard = new InlineKeyboard()
         .text('Confirm delete', `lib:folder-delete-confirm:${folderId}`)
         .text('Cancel', `lib:folder:${folderId}`);
@@ -299,6 +349,9 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
         return ctx.reply('You do not have permission to delete folders.');
       }
       const folderId = folderIdFromToken(data.slice('lib:folder-delete-confirm:'.length));
+      if (!canAccessFolder(user.id, folderId)) {
+        return ctx.reply('You cannot delete a folder you cannot access.');
+      }
       await deleteFolder(folderId, user.id);
       return showAdminFolders(ctx);
     }
@@ -307,7 +360,7 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
         return ctx.reply('You do not have permission to edit files.');
       const resourceId = resourceIdFromToken(data.slice('lib:resource-rename:'.length));
       const resource = getResource(resourceId);
-      if (!resource || resource.isDeleted) return;
+      if (!resource || resource.isDeleted || !canAccessResource(user.id, resource)) return;
       return promptForText(
         ctx,
         { type: 'resource-rename', resourceId },
@@ -320,7 +373,7 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
       }
       const resourceId = resourceIdFromToken(data.slice('lib:resource-edit:'.length));
       const resource = getResource(resourceId);
-      if (!resource || resource.isDeleted) {
+      if (!resource || resource.isDeleted || !canAccessResource(user.id, resource)) {
         return ctx.reply('That file is no longer available.', {
           reply_markup: new InlineKeyboard().text('← Resources', 'admin:resources'),
         });
@@ -341,6 +394,9 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
         return ctx.reply('You do not have permission to edit file metadata.');
       }
       const resourceId = resourceIdFromToken(data.slice('lib:resource-description:'.length));
+      if (!canAccessResourceId(user.id, resourceId)) {
+        return ctx.reply('This file is unavailable.');
+      }
       return promptForText(
         ctx,
         { type: 'resource-description', resourceId },
@@ -352,6 +408,9 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
         return ctx.reply('You do not have permission to edit file metadata.');
       }
       const resourceId = resourceIdFromToken(data.slice('lib:resource-tags:'.length));
+      if (!canAccessResourceId(user.id, resourceId)) {
+        return ctx.reply('This file is unavailable.');
+      }
       return promptForText(
         ctx,
         { type: 'resource-tags', resourceId },
@@ -363,6 +422,9 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
         return ctx.reply('You do not have permission to edit file metadata.');
       }
       const resourceId = resourceIdFromToken(data.slice('lib:resource-category:'.length));
+      if (!canAccessResourceId(user.id, resourceId)) {
+        return ctx.reply('This file is unavailable.');
+      }
       return promptForText(
         ctx,
         { type: 'resource-category', resourceId },
@@ -374,7 +436,7 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
         return ctx.reply('You do not have permission to delete files.');
       const resourceId = resourceIdFromToken(data.slice('lib:resource-delete:'.length));
       const resource = getResource(resourceId);
-      if (!resource || resource.isDeleted) return;
+      if (!resource || resource.isDeleted || !canAccessResource(user.id, resource)) return;
       const keyboard = new InlineKeyboard()
         .text(
           'Confirm delete',
@@ -387,6 +449,10 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
       if (!hasPermission(user.id, 'delete_resources'))
         return ctx.reply('You do not have permission to delete files.');
       const resourceId = resourceIdFromToken(data.slice('lib:resource-delete-confirm:'.length));
+      const resource = getResource(resourceId);
+      if (!resource || !canAccessResource(user.id, resource)) {
+        return ctx.reply('This file is unavailable.');
+      }
       await deleteResource(resourceId, user.id);
       return showAdminResources(ctx);
     }
@@ -395,7 +461,7 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
         return ctx.reply('You do not have permission to manage the recycle bin.');
       const resourceId = resourceIdFromToken(data.slice('lib:trash-resource:'.length));
       const resource = getResource(resourceId);
-      if (!resource?.isDeleted) return;
+      if (!resource?.isDeleted || !canAccessResource(user.id, resource)) return;
       const keyboard = new InlineKeyboard()
         .text('♻️ Restore', `lib:restore-resource:${resourceId.slice('resource:'.length)}`)
         .text('Delete permanently', `lib:purge-resource:${resourceId.slice('resource:'.length)}`)
@@ -411,6 +477,10 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
       if (!hasPermission(user.id, 'delete_resources'))
         return ctx.reply('You do not have permission to restore files.');
       const resourceId = resourceIdFromToken(data.slice('lib:restore-resource:'.length));
+      const resource = getResource(resourceId);
+      if (!resource || !canAccessResource(user.id, resource)) {
+        return ctx.reply('This file is unavailable.');
+      }
       await restoreResource(resourceId, user.id);
       return showRecycleBin(ctx);
     }
@@ -418,6 +488,10 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
       if (!hasPermission(user.id, 'delete_resources'))
         return ctx.reply('You do not have permission to permanently delete files.');
       const resourceId = resourceIdFromToken(data.slice('lib:purge-resource:'.length));
+      const resource = getResource(resourceId);
+      if (!resource || !resource.isDeleted || !canAccessResource(user.id, resource)) {
+        return ctx.reply('This file is unavailable.');
+      }
       const keyboard = new InlineKeyboard()
         .text(
           'Confirm permanent delete',
@@ -435,6 +509,10 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
       if (!hasPermission(user.id, 'delete_resources'))
         return ctx.reply('You do not have permission to permanently delete files.');
       const resourceId = resourceIdFromToken(data.slice('lib:purge-resource-confirm:'.length));
+      const resource = getResource(resourceId);
+      if (!resource || !resource.isDeleted || !canAccessResource(user.id, resource)) {
+        return ctx.reply('This file is unavailable.');
+      }
       await permanentDeleteResource(resourceId, user.id);
       return showRecycleBin(ctx);
     }
@@ -447,7 +525,7 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
       }
       const folderId = folderIdFromToken(data.slice('lib:trash-folder:'.length));
       const folder = index.getFolder(folderId);
-      if (!folder?.isDeleted) return;
+      if (!folder?.isDeleted || !canAccessFolder(user.id, folderId)) return;
       const keyboard = new InlineKeyboard()
         .text('♻️ Restore tree', `lib:restore-folder:${folderId.slice('folder:'.length)}`)
         .text('Delete permanently', `lib:purge-folder:${folderId.slice('folder:'.length)}`)
@@ -463,6 +541,9 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
         return ctx.reply('You do not have permission to restore folders.');
       }
       const folderId = folderIdFromToken(data.slice('lib:restore-folder:'.length));
+      if (!canAccessFolder(user.id, folderId)) {
+        return ctx.reply('This folder is unavailable.');
+      }
       await restoreFolder(folderId, user.id);
       return showRecycleBin(ctx);
     }
@@ -474,6 +555,9 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
         return ctx.reply('You do not have permission to permanently delete folders.');
       }
       const folderId = folderIdFromToken(data.slice('lib:purge-folder:'.length));
+      if (!canAccessFolder(user.id, folderId)) {
+        return ctx.reply('This folder is unavailable.');
+      }
       const keyboard = new InlineKeyboard()
         .text(
           'Confirm permanent delete',
@@ -495,6 +579,9 @@ export function registerStoreCallbacks(bot: Bot<Context>): void {
         return ctx.reply('You do not have permission to permanently delete folders.');
       }
       const folderId = folderIdFromToken(data.slice('lib:purge-folder-confirm:'.length));
+      if (!canAccessFolder(user.id, folderId)) {
+        return ctx.reply('This folder is unavailable.');
+      }
       await permanentDeleteFolder(folderId, user.id);
       return showRecycleBin(ctx);
     }

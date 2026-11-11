@@ -3,6 +3,7 @@ import logger from '../logger';
 import { createFolder, renameFolder } from '../services/folders';
 import { updateResource } from '../services/resources';
 import { hasPermission } from '../services/permissions';
+import { canAccessFolder, canAccessResourceId } from '../services/visibility';
 import { replyWithAssistant } from './assistant-ui';
 import {
   assistantCancelHint,
@@ -72,6 +73,9 @@ export function registerTextActionHandlers(bot: Bot<Context>): void {
           if (!hasPermission(telegramId, 'manage_folders')) {
             return ctx.reply('You do not have permission to manage folders.');
           }
+          if (action.parentId && !canAccessFolder(telegramId, action.parentId)) {
+            return ctx.reply('You cannot create a folder inside a folder you cannot access.');
+          }
           const folder = await createFolder(value, action.parentId, telegramId);
           await ctx.reply(`✅ Created folder "${folder.name}".`);
           return showBrowse(ctx, action.parentId);
@@ -79,6 +83,9 @@ export function registerTextActionHandlers(bot: Bot<Context>): void {
         case 'folder-rename': {
           if (!hasPermission(telegramId, 'manage_folders')) {
             return ctx.reply('You do not have permission to manage folders.');
+          }
+          if (!canAccessFolder(telegramId, action.folderId)) {
+            return ctx.reply('This folder is unavailable.');
           }
           const folder = await renameFolder(action.folderId, value, telegramId);
           await ctx.reply(`✅ Renamed folder to "${folder.name}".`);
@@ -88,6 +95,9 @@ export function registerTextActionHandlers(bot: Bot<Context>): void {
           if (!hasPermission(telegramId, 'upload_resources')) {
             return ctx.reply('You do not have permission to edit files.');
           }
+          if (!canAccessResourceId(telegramId, action.resourceId)) {
+            return ctx.reply('This file is unavailable.');
+          }
           const resource = await updateResource(action.resourceId, { title: value }, telegramId);
           await ctx.reply(`✅ Renamed file to "${resource.title}".`);
           return showResource(ctx, resource.id);
@@ -95,6 +105,9 @@ export function registerTextActionHandlers(bot: Bot<Context>): void {
         case 'resource-description': {
           if (!hasPermission(telegramId, 'upload_resources')) {
             return ctx.reply('You do not have permission to edit files.');
+          }
+          if (!canAccessResourceId(telegramId, action.resourceId)) {
+            return ctx.reply('This file is unavailable.');
           }
           const resource = await updateResource(
             action.resourceId,
@@ -107,6 +120,9 @@ export function registerTextActionHandlers(bot: Bot<Context>): void {
         case 'resource-tags': {
           if (!hasPermission(telegramId, 'upload_resources')) {
             return ctx.reply('You do not have permission to edit files.');
+          }
+          if (!canAccessResourceId(telegramId, action.resourceId)) {
+            return ctx.reply('This file is unavailable.');
           }
           const tags =
             value === '-'
@@ -122,6 +138,9 @@ export function registerTextActionHandlers(bot: Bot<Context>): void {
         case 'resource-category': {
           if (!hasPermission(telegramId, 'upload_resources')) {
             return ctx.reply('You do not have permission to edit files.');
+          }
+          if (!canAccessResourceId(telegramId, action.resourceId)) {
+            return ctx.reply('This file is unavailable.');
           }
           const resource = await updateResource(
             action.resourceId,

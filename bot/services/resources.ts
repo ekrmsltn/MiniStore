@@ -4,12 +4,24 @@
  */
 
 import crypto from 'crypto';
-import { ResourceEntity, ResourceVersionEntity, AuditEntity, generateEntityId } from '../models';
+import {
+  ResourceEntity,
+  ResourceVersionEntity,
+  AuditEntity,
+  Visibility,
+  generateEntityId,
+} from '../models';
 import { index } from '../telegram/index';
 import { deleteFile, hasStoredFile } from '../telegram/storage';
 import logger from '../logger';
-import { NotFoundError, ValidationError, ConflictError } from '../errors';
+import { NotFoundError, ValidationError, ConflictError, ForbiddenError } from '../errors';
 import { uniqueDirectoryEntryName, withDirectoryLock } from './naming';
+import {
+  canManageResourceVisibility,
+  canAccessFolder,
+  canAccessResource,
+  validateVisibilityAccounts,
+} from './visibility';
 
 const creatingFileIds = new Set<string>();
 const versioningResourceIds = new Set<string>();
@@ -29,6 +41,7 @@ export async function createResource(
   storageFileId: string,
   uploaderId: number,
   fileName = title,
+  visibility: Visibility = { mode: 'public' },
 ): Promise<ResourceEntity> {
   if (!title || title.trim().length === 0 || title.length > 500) {
     throw new ValidationError('Resource title is required');
@@ -51,6 +64,11 @@ export async function createResource(
   if (typeof fileName !== 'string' || fileName.trim().length === 0 || fileName.length > 500) {
     throw new ValidationError('Resource file name must be between 1 and 500 characters');
   }
+  try {
+    validateVisibilityAccounts(visibility);
+  } catch (error) {
+    throw new ValidationError((error as Error).message);
+  }
 
   if (checkDuplicateResource(storageFileId) || creatingFileIds.has(storageFileId)) {
     throw new ConflictError('A resource with this file already exists');
@@ -61,7 +79,7 @@ export async function createResource(
     return await withDirectoryLock(folderId, async () => {
       if (folderId) {
         const folder = index.getFolder(folderId);
-        if (!folder || folder.isDeleted) {
+        if (!folder || folder.isDeleted || !canAccessFolder(uploaderId, folderId)) {
           throw new NotFoundError(`Active folder ${folderId} not found`);
         }
       }
@@ -79,6 +97,7 @@ export async function createResource(
         fileSize,
         fileName: uniqueDirectoryEntryName(fileName, folderId, undefined, 500),
         folderId: folderId ? (folderId as `folder:${string}`) : null,
+        visibility,
         storageMessageId,
         storageFileId,
         uploaderId,
@@ -136,12 +155,15 @@ export async function updateResource(
       if (!resource) {
         throw new NotFoundError(`Resource ${resourceId} not found`);
       }
+      if (!canAccessResource(actorId, resource)) {
+        throw new ForbiddenError('You cannot edit a file you cannot access');
+      }
       if (resource.isDeleted) {
         throw new ValidationError('Cannot update a deleted resource');
       }
       if (updates.folderId !== undefined && updates.folderId) {
         const folder = index.getFolder(updates.folderId);
-        if (!folder || folder.isDeleted) {
+        if (!folder || folder.isDeleted || !canAccessFolder(actorId, updates.folderId)) {
           throw new NotFoundError(`Active folder ${updates.folderId} not found`);
         }
       }
@@ -216,6 +238,9 @@ export async function deleteResource(resourceId: string, actorId: number): Promi
     if (!resource) {
       throw new NotFoundError(`Resource ${resourceId} not found`);
     }
+    if (!canAccessResource(actorId, resource)) {
+      throw new ForbiddenError('You cannot delete a file you cannot access');
+    }
     if (resource.isDeleted) {
       throw new ValidationError('Resource is already deleted');
     }
@@ -251,6 +276,9 @@ export async function restoreResource(
       const resource = index.getResource(resourceId);
       if (!resource) {
         throw new NotFoundError(`Resource ${resourceId} not found`);
+      }
+      if (!canAccessResource(actorId, resource)) {
+        throw new ForbiddenError('You cannot restore a file you cannot access');
       }
       if (!resource.isDeleted) {
         throw new ValidationError('Resource is not deleted');
@@ -346,6 +374,9 @@ export async function permanentDeleteResource(resourceId: string, actorId: numbe
   }
   if (!resource.isDeleted) {
     throw new ValidationError('Resource must be soft-deleted before permanent deletion');
+  }
+  if (!canAccessResource(actorId, resource)) {
+    throw new ForbiddenError('You cannot permanently delete a file you cannot access');
   }
 
   const versions = index.getResourceVersions(resourceId);
@@ -443,6 +474,37 @@ export function getResourceVersion(
   return getResourceVersions(resourceId).find((version) => version.version === versionNumber);
 }
 
+export async function updateResourceVisibility(
+  resourceId: string,
+  visibility: Visibility,
+  actorId: number,
+): Promise<ResourceEntity> {
+  const resource = index.getResource(resourceId);
+  if (!resource || resource.isDeleted) {
+    throw new NotFoundError(`Active resource ${resourceId} not found`);
+  }
+  if (!canManageResourceVisibility(actorId, resource)) {
+    throw new ForbiddenError('You cannot change visibility for a file you cannot access');
+  }
+  try {
+    validateVisibilityAccounts(visibility);
+  } catch (error) {
+    throw new ValidationError(error instanceof Error ? error.message : 'Invalid visibility');
+  }
+
+  const updated: ResourceEntity = {
+    ...resource,
+    visibility,
+    updatedAt: new Date().toISOString(),
+  };
+  await index.updateEntity(updated);
+  await logAudit(actorId, 'resource.visibility_updated', resource.id, {
+    visibility: visibility.mode,
+    selectedAccountCount: visibility.mode === 'custom' ? visibility.userIds.length : 0,
+  });
+  return updated;
+}
+
 /**
  * Store the current revision before replacing it with a newly uploaded file.
  */
@@ -473,6 +535,9 @@ export async function createResourceVersion(
         }
         if (resource.isDeleted) {
           throw new ValidationError('Cannot create a new version of a deleted resource');
+        }
+        if (!canAccessResource(actorId, resource)) {
+          throw new ForbiddenError('You cannot create a version of a file you cannot access');
         }
         if (
           !file.fileName ||

@@ -8,7 +8,7 @@
 import { Api } from 'grammy';
 import { loadConfig } from '../config';
 import logger from '../logger';
-import { Entity, EntityType } from '../models';
+import { Entity, EntityType, isVisibility } from '../models';
 import { TelegramApiError } from '../errors';
 import { checkChannelReadAccess, getChannelMessage, iterateChannelHistory } from './mtproto';
 import { assertBotCanPostInChannel } from './channel-access';
@@ -156,6 +156,7 @@ function isEntityRecord(value: unknown): value is Entity {
         typeof record.name === 'string' &&
         (record.parentId === null || typeof record.parentId === 'string') &&
         typeof record.creatorId === 'number' &&
+        (record.visibility === undefined || isVisibility(record.visibility)) &&
         typeof record.isDeleted === 'boolean' &&
         (record.deletedAt === null || typeof record.deletedAt === 'string') &&
         (record.deletionBatchId === undefined || typeof record.deletionBatchId === 'string')
@@ -170,6 +171,7 @@ function isEntityRecord(value: unknown): value is Entity {
         typeof record.fileSize === 'number' &&
         (record.fileName === undefined || typeof record.fileName === 'string') &&
         (record.folderId === null || typeof record.folderId === 'string') &&
+        (record.visibility === undefined || isVisibility(record.visibility)) &&
         typeof record.storageMessageId === 'number' &&
         typeof record.storageFileId === 'string' &&
         typeof record.uploaderId === 'number' &&

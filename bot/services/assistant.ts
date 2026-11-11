@@ -6,6 +6,7 @@ import { canAccessStore } from './users';
 import { AVAILABLE_PERMISSIONS, hasPermission } from './permissions';
 import { getAssistantKnowledge } from './assistant-knowledge';
 import { getAssistantResourceContext } from './assistant/resources';
+import { canAccessFolder, canAccessResource } from './visibility';
 import {
   getAssistantIdentityContext,
   replaceUserIdentities,
@@ -29,6 +30,7 @@ interface ConversationState {
   messages: ConversationMessage[];
   updatedAt: number;
   startIndex: number;
+  resourceAccessFingerprint?: string;
 }
 const conversations = new Map<number, ConversationState>();
 const inFlightRequests = new Map<number, AbortController>();
@@ -202,8 +204,12 @@ function getAssistantContext(telegramId: number): ResolvedAssistantContext {
     ? ['all']
     : AVAILABLE_PERMISSIONS.filter((permission) => hasPermission(telegramId, permission));
 
-  const activeResources = index.getResources().filter((resource) => !resource.isDeleted);
-  const activeFolders = index.getFolders().filter((folder) => !folder.isDeleted);
+  const activeResources = index
+    .getResources()
+    .filter((resource) => !resource.isDeleted && canAccessResource(telegramId, resource));
+  const activeFolders = index
+    .getFolders()
+    .filter((folder) => !folder.isDeleted && canAccessFolder(telegramId, folder.id));
   const activity: Record<string, number> = {
     activeResources: activeResources.length,
     activeFolders: activeFolders.length,
@@ -232,6 +238,20 @@ function getAssistantContext(telegramId: number): ResolvedAssistantContext {
     },
     activeResources,
   };
+}
+
+function getAssistantAccessFingerprint(telegramId: number): string {
+  const resources = index
+    .getResources()
+    .filter((resource) => !resource.isDeleted && canAccessResource(telegramId, resource))
+    .map((resource) => resource.id)
+    .sort();
+  const folders = index
+    .getFolders()
+    .filter((folder) => !folder.isDeleted && canAccessFolder(telegramId, folder.id))
+    .map((folder) => folder.id)
+    .sort();
+  return JSON.stringify({ resources, folders });
 }
 
 function sanitizeAssistantAnswer(
@@ -402,7 +422,13 @@ export async function askAssistantWithResources(
 
   const { context, activeResources } = getAssistantContext(telegramId);
   await reserveAssistantRequest(telegramId, context.role);
+  const resourceAccessFingerprint = getAssistantAccessFingerprint(telegramId);
   let conversation = getConversationState(telegramId);
+  if (conversation.resourceAccessFingerprint !== resourceAccessFingerprint) {
+    conversations.delete(telegramId);
+    conversation = { messages: [], updatedAt: Date.now(), startIndex: 0 };
+  }
+  conversation.resourceAccessFingerprint = resourceAccessFingerprint;
   if (options.conversationPrefixLength !== undefined) {
     const absolutePrefixLength = Math.max(
       0,
@@ -416,6 +442,7 @@ export async function askAssistantWithResources(
       messages: conversation.messages.slice(0, relativePrefixLength),
       updatedAt: Date.now(),
       startIndex: Math.min(absolutePrefixLength, conversation.startIndex),
+      resourceAccessFingerprint,
     };
     conversations.set(telegramId, conversation);
   }
@@ -500,6 +527,15 @@ export async function askAssistantWithResources(
     const answer = extractAnswer(payload, config.aiApiFormat);
     if (!answer) throw new AssistantProviderError('The AI service returned no answer.');
     if (controller.signal.aborted) throw new AssistantCancelledError();
+    if (!canAccessStore(telegramId)) {
+      throw new ForbiddenError('You need an active MiniStore account to use the assistant');
+    }
+    const currentResourceAccessFingerprint = getAssistantAccessFingerprint(telegramId);
+    if (currentResourceAccessFingerprint !== resourceAccessFingerprint) {
+      throw new AssistantProviderError(
+        'Your resource access changed while I was preparing this answer. Please ask again.',
+      );
+    }
 
     const identitySafeAnswer = context.currentUsers
       ? replaceUserIdentities(
@@ -524,6 +560,7 @@ export async function askAssistantWithResources(
       messages,
       updatedAt: Date.now(),
       startIndex: conversation.startIndex + unboundedMessages.length - messages.length,
+      resourceAccessFingerprint,
     });
     const limitedAnswer = reply.answer.slice(0, MAX_ANSWER_LENGTH);
     return {

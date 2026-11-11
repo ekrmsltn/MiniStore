@@ -70,6 +70,7 @@ describe('AI assistant service', () => {
       truncated: boolean;
       items: Array<Record<string, unknown>>;
     };
+    activity?: Record<string, number>;
   } {
     const options = fetchMock.mock.calls[callIndex]?.[1] as { body: string };
     const messages = (
@@ -104,8 +105,17 @@ describe('AI assistant service', () => {
       assistantUsage = entity;
     });
     index.getResources.mockReturnValue([
-      createMockResource({ id: 'resource:one', downloadCount: 3 }),
-      createMockResource({ id: 'resource:deleted', isDeleted: true, downloadCount: 90 }),
+      createMockResource({
+        id: 'resource:one',
+        folderId: 'folder:active',
+        downloadCount: 3,
+      }),
+      createMockResource({
+        id: 'resource:deleted',
+        folderId: 'folder:active',
+        isDeleted: true,
+        downloadCount: 90,
+      }),
     ]);
     index.getFolders.mockReturnValue([
       createMockFolder({ id: 'folder:active' }),
@@ -267,6 +277,81 @@ describe('AI assistant service', () => {
       }),
     );
     expect(JSON.stringify(index.saveEntity.mock.calls[0][0])).not.toContain('How do I browse?');
+  });
+
+  it('excludes resources the caller cannot access from assistant context and counts', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: 'Use /search.' } }] }),
+    });
+    index.getResources.mockReturnValue([
+      createMockResource({
+        id: 'resource:visible',
+        folderId: 'folder:active',
+        downloadCount: 2,
+      }),
+      createMockResource({
+        id: 'resource:private',
+        folderId: 'folder:active',
+        visibility: { mode: 'custom', userIds: [98765] },
+        downloadCount: 100,
+      }),
+    ]);
+    index.getFolders.mockReturnValue([
+      createMockFolder({ id: 'folder:active' }),
+      createMockFolder({
+        id: 'folder:private',
+        visibility: { mode: 'private' },
+      }),
+    ]);
+    const { askAssistant } = await import('../services/assistant');
+
+    await askAssistant(user.telegramId, 'How do I find the document?');
+
+    const context = getContextFromRequest();
+    expect(context.currentResources?.activeCount).toBe(1);
+    expect(context.activity?.activeFolders).toBe(1);
+    expect(context.currentResources?.items.map((item) => item.resourceId)).toEqual([
+      'resource:visible',
+    ]);
+    expect(JSON.stringify(context)).not.toContain('resource:private');
+    expect(JSON.stringify(context)).not.toContain('"totalDownloads":102');
+  });
+
+  it('refreshes AI resource context and history when a parent folder visibility changes', async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'I found a file.' } }] }),
+      });
+      index.getResources.mockReturnValue([
+        createMockResource({ id: 'resource:visible', folderId: 'folder:active' }),
+      ]);
+      const activeFolder = createMockFolder({ id: 'folder:active' });
+      index.getFolders.mockReturnValue([activeFolder]);
+      const { askAssistant } = await import('../services/assistant');
+      await askAssistant(user.telegramId, 'Find a file');
+
+      await vi.advanceTimersByTimeAsync(10_001);
+      activeFolder.visibility = { mode: 'custom', userIds: [98765] };
+      await askAssistant(user.telegramId, 'What resources are available?');
+
+      const secondRequest = JSON.parse(fetchMock.mock.calls[1][1].body);
+      const userPrompt = secondRequest.messages.find(
+        (message: { role: string }) => message.role === 'user',
+      ).content as string;
+      const secondContext = getContextFromRequest(1);
+      expect(userPrompt).toContain(
+        'Recent conversation (JSON; use only for this conversation and follow the current verified role and permissions):\n[]',
+      );
+      expect(userPrompt).not.toContain('I found a file.');
+      expect(secondContext.currentResources?.activeCount).toBe(0);
+      expect(secondContext.activity?.activeFolders).toBe(0);
+      expect(JSON.stringify(secondContext)).not.toContain('resource:visible');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('resolves owner identity locally without sending profile details to the provider', async () => {

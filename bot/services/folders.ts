@@ -4,12 +4,18 @@
  */
 
 import crypto from 'crypto';
-import { FolderEntity, ResourceEntity, AuditEntity, generateEntityId } from '../models';
+import { FolderEntity, ResourceEntity, AuditEntity, Visibility, generateEntityId } from '../models';
 import { index } from '../telegram/index';
 import { permanentDeleteResource } from './resources';
 import logger from '../logger';
 import { NotFoundError, ForbiddenError, ValidationError } from '../errors';
 import { uniqueDirectoryEntryName, withDirectoryLock } from './naming';
+import {
+  canAccessFolder,
+  canAccessResource,
+  canManageFolderVisibility,
+  validateVisibilityAccounts,
+} from './visibility';
 
 const MAX_NESTING_DEPTH = 10;
 
@@ -37,6 +43,28 @@ function validateParentFolder(parentId: string | null): void {
   }
 }
 
+function assertFolderTreeAccessible(folderId: string, actorId: number): void {
+  const folderIds = new Set([folderId, ...getDescendantFolderIds(folderId)]);
+  for (const id of folderIds) {
+    if (!canAccessFolder(actorId, id)) {
+      throw new ForbiddenError(
+        'You cannot manage a folder tree containing folders you cannot access',
+      );
+    }
+  }
+  for (const resource of index.getResources()) {
+    if (
+      resource.folderId &&
+      folderIds.has(resource.folderId) &&
+      !canAccessResource(actorId, resource)
+    ) {
+      throw new ForbiddenError(
+        'You cannot manage a folder tree containing files you cannot access',
+      );
+    }
+  }
+}
+
 /**
  * Create a new folder.
  */
@@ -44,6 +72,7 @@ export async function createFolder(
   name: string,
   parentId: string | null,
   creatorId: number,
+  visibility?: Visibility,
 ): Promise<FolderEntity> {
   if (!name || name.trim().length === 0) {
     throw new ValidationError('Folder name is required');
@@ -52,9 +81,19 @@ export async function createFolder(
   if (name.length > 100) {
     throw new ValidationError('Folder name must be 100 characters or less');
   }
+  if (visibility) {
+    try {
+      validateVisibilityAccounts(visibility);
+    } catch (error) {
+      throw new ValidationError(error instanceof Error ? error.message : 'Invalid visibility');
+    }
+  }
 
   return withDirectoryLock(parentId, async () => {
     validateParentFolder(parentId);
+    if (parentId && !canAccessFolder(creatorId, parentId)) {
+      throw new ForbiddenError('You cannot create a folder inside a folder you cannot access');
+    }
     const now = new Date().toISOString();
     const folderId = generateEntityId('folder', crypto.randomBytes(8).toString('hex'));
 
@@ -63,6 +102,7 @@ export async function createFolder(
       id: folderId as `folder:${string}`,
       name: uniqueDirectoryEntryName(name, parentId, undefined, 100),
       parentId: parentId ? (parentId as `folder:${string}`) : null,
+      ...(visibility ? { visibility } : {}),
       creatorId,
       isDeleted: false,
       deletedAt: null,
@@ -79,6 +119,37 @@ export async function createFolder(
     logger.info({ folderId: folder.id, msg: 'Folder created' });
     return folder;
   });
+}
+
+export async function updateFolderVisibility(
+  folderId: string,
+  visibility: Visibility | undefined,
+  actorId: number,
+): Promise<FolderEntity> {
+  const folder = index.getFolder(folderId);
+  if (!folder || folder.isDeleted) throw new NotFoundError(`Active folder ${folderId} not found`);
+  if (!canManageFolderVisibility(actorId, folder)) {
+    throw new ForbiddenError('You cannot change visibility for a folder you cannot access');
+  }
+  if (visibility) {
+    try {
+      validateVisibilityAccounts(visibility);
+    } catch (error) {
+      throw new ValidationError(error instanceof Error ? error.message : 'Invalid visibility');
+    }
+  }
+
+  const updated: FolderEntity = {
+    ...folder,
+    visibility,
+    updatedAt: new Date().toISOString(),
+  };
+  await index.updateEntity(updated);
+  await logAudit(actorId, 'folder.visibility_updated', folder.id, {
+    visibility: visibility?.mode ?? 'inherit',
+    selectedAccountCount: visibility?.mode === 'custom' ? visibility.userIds.length : 0,
+  });
+  return updated;
 }
 
 /**
@@ -104,6 +175,9 @@ export async function renameFolder(
     const folder = index.getFolder(folderId);
     if (!folder) throw new NotFoundError(`Folder ${folderId} not found`);
     if (folder.isDeleted) throw new ForbiddenError('Cannot rename a deleted folder');
+    if (!canAccessFolder(actorId, folderId)) {
+      throw new ForbiddenError('You cannot rename a folder you cannot access');
+    }
 
     const updated: FolderEntity = {
       ...folder,
@@ -134,8 +208,12 @@ export async function moveFolder(
     const folder = index.getFolder(folderId);
     if (!folder) throw new NotFoundError(`Folder ${folderId} not found`);
     if (folder.isDeleted) throw new ForbiddenError('Cannot move a deleted folder');
+    assertFolderTreeAccessible(folderId, actorId);
 
     validateParentFolder(newParentId);
+    if (newParentId && !canAccessFolder(actorId, newParentId)) {
+      throw new ForbiddenError('You cannot move a folder into a folder you cannot access');
+    }
     if (newParentId) {
       let current: string | null = newParentId;
       while (current) {
@@ -180,6 +258,7 @@ export async function deleteFolder(folderId: string, actorId: number): Promise<F
   if (folder.isDeleted) {
     throw new ForbiddenError('Folder is already deleted');
   }
+  assertFolderTreeAccessible(folderId, actorId);
 
   const deletedAt = new Date().toISOString();
   const deletionBatchId = crypto.randomBytes(12).toString('hex');
@@ -212,6 +291,10 @@ export async function restoreFolder(folderId: string, actorId: number): Promise<
     if (!folder) throw new NotFoundError(`Folder ${folderId} not found`);
     if (!folder.isDeleted) throw new ForbiddenError('Folder is not deleted');
     validateParentFolder(folder.parentId);
+    assertFolderTreeAccessible(folderId, actorId);
+    if (folder.parentId && !canAccessFolder(actorId, folder.parentId)) {
+      throw new ForbiddenError('You cannot restore a folder into a folder you cannot access');
+    }
 
     const matchesDeletion = (deletedAt: string | null, batchId?: string) =>
       folder.deletionBatchId
@@ -295,6 +378,7 @@ export async function permanentDeleteFolder(folderId: string, actorId: number): 
   if (!folder.isDeleted) {
     throw new ForbiddenError('Folder must be in the recycle bin before permanent deletion');
   }
+  assertFolderTreeAccessible(folderId, actorId);
 
   const descendantIds = getDescendantFolderIds(folderId);
   const folderIds = new Set([folderId, ...descendantIds]);

@@ -17,6 +17,28 @@ export interface BaseEntity {
   updatedAt: string;
 }
 
+export type Visibility =
+  { mode: 'public' } | { mode: 'private' } | { mode: 'custom'; userIds: number[] };
+
+export const MAX_CUSTOM_VISIBILITY_USERS = 200;
+
+export function isVisibility(value: unknown): value is Visibility {
+  if (typeof value !== 'object' || value === null || !('mode' in value)) return false;
+  const visibility = value as Record<string, unknown>;
+  if (visibility.mode === 'public' || visibility.mode === 'private') {
+    return Object.keys(visibility).length === 1;
+  }
+  if (visibility.mode !== 'custom' || !Array.isArray(visibility.userIds)) return false;
+  return (
+    visibility.userIds.length <= MAX_CUSTOM_VISIBILITY_USERS &&
+    visibility.userIds.every(
+      (id) => typeof id === 'number' && Number.isSafeInteger(id) && id > 0,
+    ) &&
+    new Set(visibility.userIds).size === visibility.userIds.length &&
+    Object.keys(visibility).length === 2
+  );
+}
+
 export interface UserEntity extends BaseEntity {
   type: 'user';
   id: `user:${number}`;
@@ -35,6 +57,7 @@ export interface FolderEntity extends BaseEntity {
   id: `folder:${string}`;
   name: string;
   parentId: `folder:${string}` | null;
+  visibility?: Visibility;
   creatorId: number;
   isDeleted: boolean;
   deletedAt: string | null;
@@ -52,6 +75,7 @@ export interface ResourceEntity extends BaseEntity {
   fileSize: number;
   fileName?: string;
   folderId: `folder:${string}` | null;
+  visibility?: Visibility;
   storageMessageId: number;
   storageFileId: string;
   uploaderId: number;

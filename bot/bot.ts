@@ -10,11 +10,13 @@ import { privateChatOnly } from './private-chat';
 import { registerCommandHandlers } from './handlers/commands';
 import { registerTextActionHandlers } from './handlers/text-actions';
 import { registerUploadHandlers } from './handlers/uploads';
+import { registerVisibilityHandlers } from './handlers/visibility';
 
 const config = loadConfig();
 const bot = new Bot<Context>(config.botToken);
 bot.use(privateChatOnly);
 registerUploadHandlers(bot);
+registerVisibilityHandlers(bot);
 
 // Error handler — log processing and notification failures separately.
 bot.catch(async (err: BotError<Context>) => {

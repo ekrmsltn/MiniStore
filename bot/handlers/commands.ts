@@ -16,7 +16,13 @@ import {
   getAssistantUsageStatus,
   isAssistantConfigured,
 } from '../services/assistant';
-import { promptForUpload, uploadFolderState, uploadVersionState } from './uploads';
+import {
+  promptForUpload,
+  uploadFolderState,
+  uploadSetupState,
+  uploadVersionState,
+  uploadVisibilityState,
+} from './uploads';
 import {
   deleteAssistantThinkingMessage,
   formatAssistantUsage,
@@ -232,7 +238,10 @@ export function registerCommandHandlers(bot: Bot<Context>): void {
     cancelAssistantConversation(telegramId);
     clearAssistantPromptMessages(telegramId);
     if (cancelledAssistant) await deleteAssistantThinkingMessage(ctx, telegramId);
-    const cancelledUpload = uploadFolderState.delete(telegramId);
+    const cancelledUploadSession = uploadFolderState.delete(telegramId);
+    const cancelledUploadSetup = uploadSetupState.delete(telegramId);
+    const cancelledUpload = cancelledUploadSession || cancelledUploadSetup;
+    uploadVisibilityState.delete(telegramId);
     const cancelledVersion = uploadVersionState.delete(telegramId);
     const cancelledTextAction = textActionState.delete(telegramId);
     if (cancelledAssistant && canAccessStore(telegramId)) {

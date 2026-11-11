@@ -1,5 +1,11 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createMockFolder, createMockResource, resetEnv, setupEnv } from './helpers';
+import {
+  createMockFolder,
+  createMockResource,
+  createMockUser,
+  resetEnv,
+  setupEnv,
+} from './helpers';
 
 describe('Folder service', () => {
   let folders: ReturnType<typeof createMockFolder>[];
@@ -10,6 +16,8 @@ describe('Folder service', () => {
     getResources: ReturnType<typeof vi.fn>;
     getResource: ReturnType<typeof vi.fn>;
     getResourceVersions: ReturnType<typeof vi.fn>;
+    getUsers: ReturnType<typeof vi.fn>;
+    getUserByTelegramId: ReturnType<typeof vi.fn>;
     updateEntity: ReturnType<typeof vi.fn>;
     saveEntity: ReturnType<typeof vi.fn>;
     deleteEntity: ReturnType<typeof vi.fn>;
@@ -18,10 +26,12 @@ describe('Folder service', () => {
     deleteFile: ReturnType<typeof vi.fn>;
     hasStoredFile: ReturnType<typeof vi.fn>;
   };
+  let users: ReturnType<typeof createMockUser>[];
 
   beforeEach(() => {
     setupEnv();
     vi.resetModules();
+    users = [createMockUser()];
     folders = [
       createMockFolder({ id: 'folder:root', name: 'Root' }),
       createMockFolder({ id: 'folder:child', name: 'Child', parentId: 'folder:root' }),
@@ -33,6 +43,8 @@ describe('Folder service', () => {
       getResources: vi.fn(() => resources),
       getResource: vi.fn((id: string) => resources.find((resource) => resource.id === id)),
       getResourceVersions: vi.fn().mockReturnValue([]),
+      getUsers: vi.fn(() => users),
+      getUserByTelegramId: vi.fn((id: number) => users.find((user) => user.telegramId === id)),
       updateEntity: vi.fn().mockResolvedValue(undefined),
       saveEntity: vi.fn().mockResolvedValue(1),
       deleteEntity: vi.fn().mockResolvedValue(undefined),
@@ -62,6 +74,20 @@ describe('Folder service', () => {
     ]);
     expect(new Set(deletedEntities.map((entity) => entity.deletedAt)).size).toBe(1);
     expect(deletedEntities.every((entity) => entity.isDeleted)).toBe(true);
+  });
+
+  it('refuses a tree mutation when any contained resource is not accessible', async () => {
+    resources[0] = {
+      ...resources[0],
+      visibility: { mode: 'custom', userIds: [54321] },
+    };
+    users.push(createMockUser({ telegramId: 54321, id: 'user:54321' }));
+    const { deleteFolder } = await import('../services/folders');
+
+    await expect(deleteFolder('folder:root', 12345)).rejects.toThrow(
+      'You cannot manage a folder tree containing files you cannot access',
+    );
+    expect(index.updateEntity).not.toHaveBeenCalled();
   });
 
   it('restores only the contents deleted with the folder tree', async () => {

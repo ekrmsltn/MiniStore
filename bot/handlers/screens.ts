@@ -4,11 +4,39 @@ import { getResource, getResourceVersions, searchResources } from '../services/r
 import { formatFileSize } from '../telegram/storage';
 import { index } from '../telegram/index';
 import { isAssistantConfigured } from '../services/assistant';
+import { getFolderBreadcrumb } from '../services/folders';
 import { hasPermission } from '../services/permissions';
+import { canAccessFolder, canAccessResource } from '../services/visibility';
 import { textActionState, type TextAction } from './state';
 import { addBackButton, isAdminUser, renderScreen } from './screens/shared';
 
 type BrowseSort = 'name' | 'recent';
+
+interface ResourceBackTarget {
+  callbackData: string;
+  label: string;
+}
+
+const resourceBackTargets = new Map<string, ResourceBackTarget>();
+const userResourceBackTargets = new Map<number, ResourceBackTarget>();
+const searchQueriesByToken = new Map<string, { telegramId: number; query: string }>();
+let nextSearchToken = 0;
+
+function getNavigationMessageKey(ctx: Context): string | undefined {
+  const message = ctx.callbackQuery?.message;
+  return ctx.chat && message ? `${ctx.chat.id}:${message.message_id}` : undefined;
+}
+
+function getResourceBackLabel(callbackData: string): string {
+  if (callbackData === 'lib:favorites') return '← Favorites';
+  if (callbackData.startsWith('lib:search-results:')) return '← Search results';
+  if (callbackData.startsWith('admin:resources')) return '← Resources';
+  return '← Back to files';
+}
+
+function getResourceCallbackData(resourceId: string, backCallback: string): string {
+  return `lib:resource:${resourceId.slice('resource:'.length)}|${backCallback}`;
+}
 
 export function getHomeKeyboard(telegramId: number): InlineKeyboard {
   const keyboard = new InlineKeyboard()
@@ -52,15 +80,22 @@ export async function showBrowse(
   }
 
   const folder = folderId ? index.getFolder(folderId) : undefined;
-  if (folderId && (!folder || folder.isDeleted)) {
+  if (folderId && (!folder || folder.isDeleted || !canAccessFolder(telegramId, folderId))) {
     await renderScreen(ctx, 'That folder is no longer available.', getHomeKeyboard(telegramId));
     return;
   }
 
-  const childFolders = folderId ? index.getChildFolders(folderId) : index.getRootFolders();
+  const childFolders = (folderId ? index.getChildFolders(folderId) : index.getRootFolders()).filter(
+    (item) => canAccessFolder(telegramId, item.id),
+  );
   const resources = index
     .getResources()
-    .filter((resource) => !resource.isDeleted && resource.folderId === folderId);
+    .filter(
+      (resource) =>
+        !resource.isDeleted &&
+        resource.folderId === folderId &&
+        canAccessResource(telegramId, resource),
+    );
   const entries = [
     ...childFolders.map((item) => ({
       kind: 'folder' as const,
@@ -84,8 +119,23 @@ export async function showBrowse(
   const pageCount = Math.max(1, Math.ceil(entries.length / pageSize));
   const requestedPage = Number.isSafeInteger(page) ? page : 0;
   const safePage = Math.min(Math.max(0, requestedPage), pageCount - 1);
+  const folderToken = folderId?.slice('folder:'.length) || 'root';
   const pageEntries = entries.slice(safePage * pageSize, (safePage + 1) * pageSize);
   const keyboard = new InlineKeyboard();
+  const breadcrumb = folderId ? getFolderBreadcrumb(folderId) : [];
+  if (folderId && breadcrumb.length > 1) {
+    keyboard.text('📂 Root', 'lib:browse:root').row();
+    for (const ancestor of breadcrumb.slice(0, -1)) {
+      if (canAccessFolder(telegramId, ancestor.id)) {
+        keyboard
+          .text(
+            `📁 ${ancestor.name}`.slice(0, 60),
+            `lib:browse:${ancestor.id.slice('folder:'.length)}`,
+          )
+          .row();
+      }
+    }
+  }
 
   for (const entry of pageEntries) {
     const label = `${entry.kind === 'folder' ? '📁' : '📄'} ${entry.name}`.slice(0, 60);
@@ -94,11 +144,13 @@ export async function showBrowse(
         label,
         entry.kind === 'folder'
           ? `lib:browse:${entry.id.slice('folder:'.length)}`
-          : `lib:resource:${entry.id.slice('resource:'.length)}`,
+          : getResourceCallbackData(
+              entry.id,
+              `lib:b:${folderToken}:${safePage}:${sort === 'recent' ? 'r' : 'n'}`,
+            ),
       )
       .row();
   }
-  const folderToken = folderId?.slice('folder:'.length) || 'root';
   keyboard.text(
     sort === 'name' ? 'Sort: Name' : 'Sort: Newest',
     `lib:sort:${folderToken}:${sort === 'name' ? 'recent' : 'name'}`,
@@ -138,17 +190,46 @@ export async function showBrowse(
 export async function showResource(
   ctx: Context,
   resourceId: string,
-  back = 'lib:browse:root',
+  back?: string,
   versionPage = 0,
 ): Promise<void> {
   const telegramId = ctx.from?.id;
   const resource = getResource(resourceId);
-  if (!telegramId || !canAccessStore(telegramId) || !resource || resource.isDeleted) {
+  if (
+    !telegramId ||
+    !canAccessStore(telegramId) ||
+    !resource ||
+    resource.isDeleted ||
+    !canAccessResource(telegramId, resource)
+  ) {
     await renderScreen(ctx, 'This file is unavailable.', getHomeKeyboard(telegramId ?? 0));
     return;
   }
 
   const resourceToken = resource.id.slice('resource:'.length);
+  const navigationKey = getNavigationMessageKey(ctx);
+  const resourceBack =
+    back ??
+    (navigationKey ? resourceBackTargets.get(navigationKey)?.callbackData : undefined) ??
+    userResourceBackTargets.get(telegramId)?.callbackData ??
+    `lib:browse:${resource.folderId?.slice('folder:'.length) || 'root'}`;
+  const resourceBackTarget = {
+    callbackData: resourceBack,
+    label: getResourceBackLabel(resourceBack),
+  };
+  userResourceBackTargets.set(telegramId, resourceBackTarget);
+  if (userResourceBackTargets.size > 500) {
+    const oldestUserId = userResourceBackTargets.keys().next().value;
+    if (oldestUserId !== undefined) userResourceBackTargets.delete(oldestUserId);
+  }
+  if (navigationKey) {
+    resourceBackTargets.set(navigationKey, resourceBackTarget);
+    if (resourceBackTargets.size > 500) {
+      const oldestKey = resourceBackTargets.keys().next().value;
+      if (oldestKey) resourceBackTargets.delete(oldestKey);
+    }
+  }
+  const resourceBackLabel = resourceBackTarget.label;
   const keyboard = new InlineKeyboard().text('⬇️ Download', `lib:download:${resourceToken}`).row();
   const previousVersions = getResourceVersions(resource.id).filter(
     (version) => version.version !== resource.version,
@@ -185,15 +266,21 @@ export async function showResource(
       .row()
       .text('🔁 Upload new version', `lib:version:${resourceToken}`)
       .text('✏️ Edit metadata', `lib:resource-edit:${resourceToken}`);
+    keyboard
+      .row()
+      .text(
+        `🔐 Visibility: ${resource.visibility?.mode ?? 'public'}`,
+        `visibility:open:resource:${resourceToken}`,
+      );
   }
   if (hasPermission(telegramId, 'delete_resources')) {
     keyboard.row().text('🗑️ Move to recycle bin', `lib:resource-delete:${resourceToken}`);
   }
-  keyboard.row().text('← Back to files', back);
+  keyboard.row().text(resourceBackLabel, resourceBack);
 
   const size = formatFileSize(resource.fileSize);
   const text =
-    `📄 ${resource.title}\n${resource.description ? `\n${resource.description}\n` : '\n'}Type: ${resource.fileType}\nSize: ${size}\nVersion: ${resource.version} · Downloads: ${resource.downloadCount}${resource.categoryId ? `\nCategory: ${resource.categoryId}` : ''}${resource.tags.length ? `\nTags: ${resource.tags.join(', ')}` : ''}`.slice(
+    `📄 ${resource.title}\nVisibility: ${resource.visibility?.mode ?? 'public'}${resource.description ? `\n\n${resource.description}\n` : '\n'}Type: ${resource.fileType}\nSize: ${size}\nVersion: ${resource.version} · Downloads: ${resource.downloadCount}${resource.categoryId ? `\nCategory: ${resource.categoryId}` : ''}${resource.tags.length ? `\nTags: ${resource.tags.join(', ')}` : ''}`.slice(
       0,
       4000,
     );
@@ -203,13 +290,21 @@ export async function showResource(
 export async function showSearchResults(ctx: Context, query: string): Promise<void> {
   const telegramId = ctx.from?.id;
   if (!telegramId || !canAccessStore(telegramId)) return;
-  const results = searchResources(query).slice(0, 20);
+  const searchToken = (++nextSearchToken).toString(36);
+  searchQueriesByToken.set(searchToken, { telegramId, query });
+  if (searchQueriesByToken.size > 500) {
+    const oldestToken = searchQueriesByToken.keys().next().value;
+    if (oldestToken !== undefined) searchQueriesByToken.delete(oldestToken);
+  }
+  const results = searchResources(query)
+    .filter((resource) => canAccessResource(telegramId, resource))
+    .slice(0, 20);
   const keyboard = new InlineKeyboard();
   for (const resource of results) {
     keyboard
       .text(
         `📄 ${resource.title}`.slice(0, 60),
-        `lib:resource:${resource.id.slice('resource:'.length)}`,
+        getResourceCallbackData(resource.id, `lib:search-results:${searchToken}`),
       )
       .row();
   }
@@ -224,19 +319,28 @@ export async function showSearchResults(ctx: Context, query: string): Promise<vo
   );
 }
 
+export async function showLastSearchResults(ctx: Context, searchToken: string): Promise<void> {
+  const telegramId = ctx.from?.id;
+  const search = searchQueriesByToken.get(searchToken);
+  if (telegramId && search?.telegramId === telegramId) return showSearchResults(ctx, search.query);
+  await promptForText(ctx, { type: 'search' }, 'Send a search phrase to find files.');
+}
+
 export async function showFavorites(ctx: Context): Promise<void> {
   const telegramId = ctx.from?.id;
   if (!telegramId || !canAccessStore(telegramId)) return;
   const favorites = (getUserById(telegramId)?.favorites ?? [])
     .map((id) => getResource(id))
-    .filter((resource) => resource && !resource.isDeleted);
+    .filter(
+      (resource) => resource && !resource.isDeleted && canAccessResource(telegramId, resource),
+    );
   const keyboard = new InlineKeyboard();
   for (const resource of favorites) {
     if (resource)
       keyboard
         .text(
           `⭐ ${resource.title}`.slice(0, 60),
-          `lib:resource:${resource.id.slice('resource:'.length)}`,
+          getResourceCallbackData(resource.id, 'lib:favorites'),
         )
         .row();
   }

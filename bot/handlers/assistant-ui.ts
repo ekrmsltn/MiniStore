@@ -1,6 +1,7 @@
 import { Context, GrammyError, InlineKeyboard } from 'grammy';
 import logger from '../logger';
 import { getResource } from '../services/resources';
+import { canAccessResource } from '../services/visibility';
 import {
   askAssistantWithResources,
   AssistantCancelledError,
@@ -71,7 +72,7 @@ export async function replyWithAssistant(
     const answer = `${boundedAnswer}\n\n${formatAssistantUsage(usage)}`;
     const sentMessage = revision
       ? await editAssistantReply(ctx, revision, answer, assistantReply.resourceIds)
-      : await sendAssistantReply(ctx, answer, assistantReply.resourceIds);
+      : await sendAssistantReply(ctx, answer, assistantReply.resourceIds, telegramId);
     const trackedPromptMessageId = promptMessageId ?? revision?.promptMessageId;
     if (trackedPromptMessageId !== undefined && ctx.chat) {
       rememberAssistantPrompt({
@@ -98,10 +99,15 @@ export function formatAssistantUsage(usage: AssistantUsageStatus): string {
   return `Assistant usage (fixed 24-hour window): ${usage.used}/${usage.limit} used; ${usage.remaining} remaining.${reset}`;
 }
 
-function getAssistantResourceKeyboard(resourceIds: string[]): InlineKeyboard | undefined {
+function getAssistantResourceKeyboard(
+  resourceIds: string[],
+  telegramId: number,
+): InlineKeyboard | undefined {
   const resources = resourceIds.flatMap((resourceId) => {
     const resource = getResource(resourceId);
-    return resource && !resource.isDeleted ? [resource] : [];
+    return resource && !resource.isDeleted && canAccessResource(telegramId, resource)
+      ? [resource]
+      : [];
   });
   if (resources.length === 0) return undefined;
 
@@ -118,9 +124,10 @@ async function sendAssistantReply(
   ctx: Context,
   answer: string,
   resourceIds: string[] = [],
+  telegramId = ctx.from?.id ?? 0,
 ): Promise<number> {
   const reply = prepareAssistantReply(answer, assistantCancelHint);
-  const replyMarkup = getAssistantResourceKeyboard(resourceIds);
+  const replyMarkup = getAssistantResourceKeyboard(resourceIds, telegramId);
   const options = {
     ...(reply.parseMode ? { parse_mode: reply.parseMode } : {}),
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
@@ -178,7 +185,7 @@ async function editAssistantReply(
   resourceIds: string[],
 ): Promise<number> {
   const reply = prepareAssistantReply(answer, assistantCancelHint);
-  const replyMarkup = getAssistantResourceKeyboard(resourceIds);
+  const replyMarkup = getAssistantResourceKeyboard(resourceIds, previousReply.userId);
   const options = {
     ...(reply.parseMode ? { parse_mode: reply.parseMode } : {}),
     reply_markup: replyMarkup ?? new InlineKeyboard(),
